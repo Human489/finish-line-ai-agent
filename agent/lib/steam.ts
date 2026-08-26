@@ -78,7 +78,9 @@ export async function resolveSteamId(
   return {
     steamId,
     privacyState: xml.match(/<privacyState>([^<]+)<\/privacyState>/)?.[1] ?? "unknown",
-    personaName: xml.match(/<steamID><!\[CDATA\[([^\]]*)\]\]><\/steamID>/)?.[1],
+    // Non-greedy up to the actual `]]></steamID>` terminator: a `[^\]]*` body
+    // truncates any persona name that itself contains a `]` (e.g. "[EU] Name").
+    personaName: xml.match(/<steamID><!\[CDATA\[([\s\S]*?)\]\]><\/steamID>/)?.[1],
   };
 }
 
@@ -123,6 +125,8 @@ export type AchievementProgress = {
   /** 0-100, or null when the game has no achievements. */
   percent: number | null;
   unearned: string[];
+  /** True when we could not determine whether this game has achievements (network/parse failure, or Steam refused). Distinct from a confirmed "has none". */
+  unknown: boolean;
 };
 
 /**
@@ -138,6 +142,7 @@ export async function getAchievementProgress(
     `${WEB_API}/ISteamUserStats/GetPlayerAchievements/v1/` +
     `?key=${apiKey()}&steamid=${steamId}&appid=${appid}&l=en&format=json`;
 
+  // "Confirmed none" - Steam answered and there is genuinely nothing to earn.
   const empty: AchievementProgress = {
     appid,
     hasAchievements: false,
@@ -145,24 +150,37 @@ export async function getAchievementProgress(
     total: 0,
     percent: null,
     unearned: [],
+    unknown: false,
   };
+
+  // "Could not tell" - a transient failure, not a fact about the game. Kept
+  // distinct from `empty` so downstream scoring never claims "no achievements"
+  // off the back of a dropped connection or a malformed body.
+  const unknown: AchievementProgress = { ...empty, unknown: true };
 
   let response: Response;
   try {
     response = await keyedFetch(url);
   } catch {
-    return empty;
+    return unknown;
   }
 
-  // 400 here means "this game has no achievements" or "stats are private".
-  if (!response.ok) return empty;
+  // 400 here is ambiguous between "this game has no achievements" and "stats
+  // are private" - either way Steam refused to answer, so this is unknown,
+  // not a confirmed absence.
+  if (!response.ok) return unknown;
 
-  const body = (await response.json()) as {
+  let body: {
     playerstats?: {
       success?: boolean;
       achievements?: { apiname: string; achieved: number }[];
     };
   };
+  try {
+    body = await response.json();
+  } catch {
+    return unknown;
+  }
 
   const achievements = body.playerstats?.achievements;
   if (!body.playerstats?.success || !achievements || achievements.length === 0) {
@@ -178,6 +196,7 @@ export async function getAchievementProgress(
     total: achievements.length,
     percent: Math.round((earned / achievements.length) * 1000) / 10,
     unearned: achievements.filter((a) => a.achieved !== 1).map((a) => a.apiname),
+    unknown: false,
   };
 }
 
