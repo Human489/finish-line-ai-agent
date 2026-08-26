@@ -214,9 +214,67 @@ const titleCase = (value: string) =>
   value.charAt(0).toUpperCase() + value.slice(1);
 
 /**
+ * Steam's own portrait box art. Confirmed 600x900 (2:3) real image/jpeg,
+ * 200 for every appid tested (including appid 10, Counter-Strike) and a
+ * clean 404 for a nonexistent one — see the akamai host, not the
+ * shared.cloudflare.steamstatic.com store_item_assets host, which
+ * 301-redirects instead of serving the file directly.
+ */
+const artworkUrl = (appid: number) =>
+  `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/library_600x900.jpg`;
+
+/**
+ * The image is decorative — the name is already real, selectable text right
+ * below it — so alt="" rather than duplicating the name into alt text.
+ *
+ * aspect-[2/3] reserves the known 600x900 ratio before the image has
+ * loaded (or if it 404s and falls back), so the grid's row heights don't
+ * jump once artwork starts arriving. onError swaps to a flat placeholder
+ * that still shows the name legibly instead of leaving a broken-image icon
+ * on screen — a plain `display: none` was rejected because it would leave a
+ * hole in the grid instead of a same-sized placeholder.
+ */
+function GameArtwork({ appid, name }: { appid: number; name: string }) {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <div className="relative aspect-2/3 w-full overflow-hidden rounded-md bg-muted">
+      {failed ? (
+        <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
+          {name}
+        </div>
+      ) : (
+        /*
+         * A plain <img>, not next/image, deliberately. next/image would need
+         * Steam's CDN added to images.remotePatterns and would then proxy every
+         * one of these through our own server to re-optimise them — a request
+         * per game, per answer, billable on Vercel. These are already ~50-100KB
+         * JPEGs on Valve's CDN at exactly the size we display them, so there is
+         * nothing to win and a dependency on our server staying up to lose.
+         */
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={artworkUrl(appid)}
+          alt=""
+          loading="lazy"
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * Built for scanning, not reading. The eye should land on the progress bar and
  * the hours-left figure — the two things that actually decide "which of these
  * do I play" — with everything else demoted to a single quiet line.
+ *
+ * flex flex-col h-full + the grid's `items-stretch` (grid's default) makes
+ * every card in a row match the tallest one, so a card with 3 dataGaps lines
+ * doesn't leave its neighbours looking broken. mt-auto on the dataGaps
+ * block — the one section of genuinely variable height — pins it to the
+ * bottom rather than letting it float directly under a short metrics line.
  */
 function GameResultCard({ game }: { game: ScoredGameResult }) {
   const badgeClassName = CATEGORY_STYLE.get(game.categoryLabel) ?? "";
@@ -234,9 +292,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 
   return (
-    <div className="rounded-lg border p-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate font-medium">{game.name}</span>
+    <div className="flex h-full flex-col rounded-lg border p-3">
+      <GameArtwork appid={game.appid} name={game.name} />
+
+      {/* items-start, not items-baseline: with the name now able to wrap to
+          two lines (long titles like "Middle-earth™: Shadow of Mordor"),
+          baseline alignment would pull the badge down to the last line. */}
+      <div className="mt-2.5 flex items-start justify-between gap-3">
+        <span className="font-medium break-words">{game.name}</span>
         <Badge className={`shrink-0 ${badgeClassName}`}>{game.categoryLabel}</Badge>
       </div>
 
@@ -270,7 +333,24 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
           lead with what is actually known: how many achievements are left.
           The hours caveat is spelled out in dataGaps below.
         */}
-        {facts.remainingIsFloor && typeof metrics.achievementsLeft === "number" ? (
+        {/*
+          Three cases, most informative first. When the linear figure does not
+          hold we prefer the scarcity-weighted RANGE, which reallocates the
+          completionist time by how rare each remaining achievement is — the
+          spread is the point, so it is always shown as two bounds and never
+          collapsed to a midpoint. Only when that cannot be computed (no rarity
+          data, or the map does not cover what is unearned) do we fall back to
+          the bare achievements-left count.
+        */}
+        {typeof metrics.estHoursRemainingLow === "number" &&
+        typeof metrics.estHoursRemainingHigh === "number" ? (
+          <span>
+            <span className="font-medium tabular-nums">
+              {metrics.estHoursRemainingLow}–{metrics.estHoursRemainingHigh}h
+            </span>
+            <span className="text-muted-foreground"> left (estimated)</span>
+          </span>
+        ) : facts.remainingIsFloor && typeof metrics.achievementsLeft === "number" ? (
           <span>
             <span className="font-medium tabular-nums">
               {metrics.achievementsLeft}
@@ -325,7 +405,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
       )}
 
       {facts.dataGaps.length > 0 && (
-        <ul className="mt-2 space-y-0.5 border-t pt-2 text-xs text-muted-foreground">
+        <ul className="mt-auto space-y-0.5 border-t pt-2 text-xs text-muted-foreground">
           {facts.dataGaps.map((gap) => (
             <li key={gap}>{gap}</li>
           ))}
@@ -342,9 +422,23 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
 
   return (
     <div className="space-y-2 p-3">
-      {output.scored.map((game) => (
-        <GameResultCard key={game.appid} game={game} />
-      ))}
+      {/*
+        1 column under ~448px (default), 2 from sm (384px+ of actual card
+        width once the p-4 message padding is subtracted), capped at 2 even
+        at the widest point this ever renders: the page shell is max-w-3xl
+        (768px) minus the message bubble's own padding, and a portrait card
+        needs real width for its 2:3 artwork plus a category badge on the
+        name line — 3-up at that container width measured under ~200px per
+        card, which crushed both the artwork and "Middle-earth™: Shadow of
+        Mordor" onto illegibly narrow columns. Grid, not flex-wrap: equal
+        row heights across a row of mismatched content (0 vs 3 dataGaps
+        lines) is what grid's row-track sizing gives for free.
+      */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {output.scored.map((game) => (
+          <GameResultCard key={game.appid} game={game} />
+        ))}
+      </div>
       {output.unknownAppids.length > 0 && (
         // Matches the dataGaps styling on a card: quiet, muted, not an error.
         // We only have the raw appids here, not names — score_backlog found

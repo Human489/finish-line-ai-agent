@@ -82,9 +82,13 @@ When adding a metric, add it to `scoring.ts` — never let the model derive one.
 
 ### Hours-remaining is sometimes a floor, not an estimate
 
-`estHoursRemaining` is linear extrapolation from achievement percentage. That collapses when the remaining achievements are rare — the last few in a completionist run are the hardest. When `avgRarityUnearned < 10`, `facts.remainingIsFloor` is set and **the hours figure is suppressed everywhere**: the card shows achievements-left instead, `templateReason` omits it, and `toModelOutput` strips it so the model cannot quote it.
+`estHoursRemaining` is linear extrapolation from achievement percentage. That collapses when the remaining achievements are rare — the last few in a completionist run are the hardest. When `avgRarityUnearned < 10`, `facts.remainingIsFloor` is set and **the linear figure is suppressed everywhere**: `templateReason` omits it, `quotableMetrics` drops it, and `toModelOutput` strips it so the model cannot quote it.
 
-Don't "fix" this by inventing a difficulty multiplier — no source publishes per-achievement difficulty.
+Suppression alone left ~45% of a real library with no time estimate at all, so `scarcityWeightedRemaining()` replaces it with a **range** (`estHoursRemainingLow` / `estHoursRemainingHigh`). It allocates HowLongToBeat's completionist total across the game's achievements in proportion to how scarce each one is, under two weightings — `-ln p` (gentle) and `1/p` (steep) — which bracket the plausible answer. The spread is the message: reporting a midpoint would assert precision the data does not support. Real effect: Hollow Knight's single 5.3%-unlock achievement goes from "1h" to "2–3.1h"; Cult of the Lamb's nine at 2% from "4.8h" to "9.7–15.7h".
+
+It returns null — falling back to the achievements-left count — when rarity data is missing, when the map covers under half the unearned achievements, or when it covers under half the game's total. That last guard matters: a map describing only the outstanding achievements would make them look like 100% of the work and hand over the entire completionist time.
+
+**Don't replace this with a fixed difficulty multiplier, and don't add a third-party difficulty source.** Both were investigated. No source publishes per-achievement difficulty or time: Steam's `ISteamUserStats` exposes unlock percentage and nothing else; SteamHunters and AStats only restate that same rarity (SteamHunters' own docs say rarity is not difficulty); completionist.me and Exophase don't have the field. TrueSteamAchievements has crowd-voted difficulty but no API at all, HTML only, and its `robots.txt` opens with "go away". SteamHunters' `robots.txt` explicitly disallows ClaudeBot and reserves EU TDM rights; AStats tightened theirs specifically to stop bots. Scraping any of them is against their stated wishes, and the scarcity weighting above needs no new dependency.
 
 ### Built-in eve tools must be explicitly disabled
 

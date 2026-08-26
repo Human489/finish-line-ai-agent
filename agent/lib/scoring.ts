@@ -61,6 +61,94 @@ export type ScoredGame = {
 
 const round = (value: number) => Math.round(value * 10) / 10;
 
+/**
+ * Effort weights for a single achievement, from its global unlock rate.
+ *
+ * There is no source anywhere that publishes how long an individual
+ * achievement takes — I checked Steam's own Web API, SteamHunters,
+ * TrueSteamAchievements, AStats, Exophase and completionist.me. Steam publishes
+ * unlock RATES and nothing else, SteamHunters' own documentation states plainly
+ * that rarity is not difficulty, and TrueSteamAchievements has no API at all
+ * (and blocks automated requests). So this does not attempt to know the real
+ * figure.
+ *
+ * What it does instead is allocate a total we DO know — HowLongToBeat's
+ * completionist time for the whole game — across the achievements in
+ * proportion to how scarce each one is. That is still a model, but every input
+ * is published data rather than an invented constant.
+ *
+ * Two weightings are used deliberately, because the right curve is unknowable:
+ *   - `gentle` (-ln p) treats a 1%-unlock achievement as ~6.6x an average one
+ *   - `steep`  (1/p)   treats it as ~50x
+ * They bracket the plausible range, and the SPREAD between them is the honest
+ * signal: wide spread means "we really don't know". Reporting one number here
+ * would assert precision the data cannot support.
+ */
+const RARITY_FLOOR_PERCENT = 0.1;
+
+function effortWeights(percent: number): { gentle: number; steep: number } {
+  // Clamped: Steam reports 0% for achievements nobody has unlocked, which would
+  // divide by zero and make one achievement swamp the entire allocation.
+  const p = Math.min(100, Math.max(RARITY_FLOOR_PERCENT, percent));
+  return { gentle: -Math.log(p / 100), steep: 1 / p };
+}
+
+/**
+ * Hours remaining, allocated by scarcity rather than by a flat percentage.
+ *
+ * Returns null when the rarity map does not cover enough of the achievement
+ * list to be meaningful — in that case the caller keeps the linear estimate
+ * rather than inventing one.
+ */
+function scarcityWeightedRemaining(
+  achievements: AchievementProgress | null | undefined,
+  rarity: Record<string, number> | null | undefined,
+  fullCompletionHours: number | null,
+): { low: number; high: number } | null {
+  if (!achievements?.hasAchievements || !rarity || fullCompletionHours === null) return null;
+
+  const all = Object.entries(rarity).filter(([, v]) => typeof v === "number");
+  if (all.length === 0) return null;
+
+  // The allocation is a SHARE of the whole game's effort, so it is only
+  // meaningful if the rarity map actually describes the whole game. A partial
+  // map — one covering only the achievements still outstanding, say — would
+  // make those look like 100% of the work and hand over the entire completionist
+  // time. Steam returns every achievement, so this should not happen; it is
+  // guarded because being wrong here means confidently overstating.
+  if (achievements.total > 0 && all.length < achievements.total * 0.5) return null;
+
+  // The rarity map covers every achievement in the game; `unearned` is the
+  // subset this player still has to do.
+  const unearned = new Set(achievements.unearned);
+  let totalGentle = 0;
+  let totalSteep = 0;
+  let leftGentle = 0;
+  let leftSteep = 0;
+  let matched = 0;
+
+  for (const [apiname, percent] of all) {
+    const w = effortWeights(percent);
+    totalGentle += w.gentle;
+    totalSteep += w.steep;
+    if (unearned.has(apiname)) {
+      matched += 1;
+      leftGentle += w.gentle;
+      leftSteep += w.steep;
+    }
+  }
+
+  // If the rarity map missed most of what is unearned, the allocation would be
+  // badly skewed low. Better to fall back than to under-report confidently.
+  if (matched === 0 || matched < achievements.unearned.length * 0.5) return null;
+  if (totalGentle <= 0 || totalSteep <= 0) return null;
+
+  const gentle = round(fullCompletionHours * (leftGentle / totalGentle));
+  const steep = round(fullCompletionHours * (leftSteep / totalSteep));
+
+  return { low: Math.min(gentle, steep), high: Math.max(gentle, steep) };
+}
+
 function meanRarityOfUnearned(
   achievements: AchievementProgress | null | undefined,
   rarity: Record<string, number> | null | undefined,
@@ -182,7 +270,37 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
 
   if (estHoursRemaining !== null) metrics.estHoursRemaining = estHoursRemaining;
 
-  if (remainingIsFloor && estHoursRemaining !== null) {
+  /*
+   * When the linear figure is known not to hold, try to replace it with
+   * something better rather than showing nothing. Suppressing it entirely was
+   * correct in the sense that the number was wrong, but it left ~45% of a real
+   * library with no time estimate at all, which is the single figure players
+   * most want.
+   *
+   * The range below is not a second opinion on the same guess — it reallocates
+   * the same known completionist total by how scarce each remaining
+   * achievement is. Where the linear estimate says "5% of the achievements are
+   * left so 5% of the time is left", this says "the achievements left are the
+   * ones almost nobody unlocks, so they are worth much more than 5% of it".
+   */
+  const scarcityRange = remainingIsFloor
+    ? scarcityWeightedRemaining(achievements, rarity, fullCompletionHours)
+    : null;
+
+  if (scarcityRange) {
+    metrics.estHoursRemainingLow = scarcityRange.low;
+    metrics.estHoursRemainingHigh = scarcityRange.high;
+  }
+
+  if (remainingIsFloor && scarcityRange) {
+    const left = metrics.achievementsLeft;
+    // Deliberately quotes the RANGE and not the linear figure: the range is
+    // the defensible number here, and naming the linear one would re-introduce
+    // exactly the "about an hour" impression the range exists to correct.
+    dataGaps.push(
+      `${left !== undefined ? `${left} achievement${left === 1 ? "" : "s"} left, ` : ""}unlocked by ${avgRarityUnearned}% of players. Rare achievements take far longer than average ones, so the estimate spreads the remaining completionist time by how scarce each one is — treat it as a range, not a figure.`,
+    );
+  } else if (remainingIsFloor && estHoursRemaining !== null) {
     const left = metrics.achievementsLeft;
     // State the facts rather than a stock adverb. How much longer it takes is
     // genuinely unknown — the rarity is the checkable part, so lead with it.
@@ -411,7 +529,16 @@ export function templateReason(game: ScoredGame): string {
   if (metrics.achievementPercent !== undefined) {
     parts.push(`${metrics.achievementPercent}% achievements`);
   }
-  if (game.facts.remainingIsFloor && metrics.achievementsLeft !== undefined) {
+  if (
+    metrics.estHoursRemainingLow !== undefined &&
+    metrics.estHoursRemainingHigh !== undefined
+  ) {
+    // Both bounds carry an explicit unit so findUngroundedNumbers validates
+    // each of them — "3h–7h" would leave the lower bound unchecked.
+    parts.push(
+      `roughly ${metrics.estHoursRemainingLow}h to ${metrics.estHoursRemainingHigh}h left`,
+    );
+  } else if (game.facts.remainingIsFloor && metrics.achievementsLeft !== undefined) {
     // Deliberately no hours figure: it is known not to hold here.
     const left = metrics.achievementsLeft;
     parts.push(`${left} rare achievement${left === 1 ? "" : "s"} left`);

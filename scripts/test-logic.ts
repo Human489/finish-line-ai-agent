@@ -312,6 +312,101 @@ async function main() {
     assert.deepEqual(findUngroundedNumbers(sentence, quotableMetrics(walled)), [`${hours} hours`]);
   });
 
+  // --- scarcity-weighted range --------------------------------------------
+  // Replaces "time remaining is unknown" for rarity-walled games. Allocates the
+  // known completionist total across achievements by how scarce each is,
+  // instead of assuming every remaining one costs an average amount.
+
+  /**
+   * A realistic rarity map covers EVERY achievement, not just the unearned
+   * ones — 90 commonly-unlocked achievements the player has, plus the 10 rare
+   * ones they do not. Using a map that only contains the unearned set would
+   * hand the whole time budget to them and prove nothing.
+   */
+  const fullRarityMap = (unearnedPercent: number) => {
+    const map: Record<string, number> = {};
+    for (let i = 0; i < 90; i++) map[`earned${i}`] = 55;
+    for (const key of "abcdefghij") map[key] = unearnedPercent;
+    return map;
+  };
+
+  await test("rare remainder produces a range well above the linear figure", () => {
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: fullRarityMap(1) },
+      "completionist",
+    );
+    const { estHoursRemaining, estHoursRemainingLow, estHoursRemainingHigh } = scored.metrics;
+
+    assert.equal(scored.facts.remainingIsFloor, true);
+    assert.ok(estHoursRemainingLow !== undefined && estHoursRemainingHigh !== undefined, "expected a range");
+    assert.ok(estHoursRemainingLow <= estHoursRemainingHigh, "bounds must be ordered");
+    assert.ok(
+      estHoursRemainingLow > estHoursRemaining,
+      `range should exceed the linear estimate (${estHoursRemainingLow} vs ${estHoursRemaining})`,
+    );
+  });
+
+  await test("scarcer achievements produce a larger estimate", () => {
+    const mk = (pct: number) =>
+      scoreGame(
+        { ...base, achievements: achievements(), playtime: playtime(), rarity: fullRarityMap(pct) },
+        "completionist",
+      ).metrics.estHoursRemainingHigh;
+
+    const veryRare = mk(0.5);
+    const lessRare = mk(9);
+    assert.ok(
+      veryRare > lessRare,
+      `0.5%-unlock remainder should cost more than 9% (${veryRare} vs ${lessRare})`,
+    );
+  });
+
+  await test("the range never exceeds the total completionist time", () => {
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime({ hoursTo100: 20 }), rarity: fullRarityMap(0.5) },
+      "completionist",
+    );
+    assert.ok(
+      scored.metrics.estHoursRemainingHigh <= 20,
+      `cannot need more time than the whole game takes: ${scored.metrics.estHoursRemainingHigh}`,
+    );
+  });
+
+  await test("no rarity data falls back to achievements-left, not a made-up range", () => {
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: null },
+      "completionist",
+    );
+    assert.equal(scored.metrics.estHoursRemainingLow, undefined);
+    assert.equal(scored.metrics.estHoursRemainingHigh, undefined);
+    assert.ok(scored.metrics.achievementsLeft !== undefined, "must still say how many are left");
+  });
+
+  await test("a rarity map covering only part of the game produces no range", () => {
+    // RARE lists just the 10 unearned achievements, not the other 90. Treating
+    // that as the whole game would make the remainder look like 100% of the
+    // effort and hand over the entire completionist time.
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
+      "completionist",
+    );
+    assert.equal(scored.metrics.estHoursRemainingLow, undefined);
+    assert.equal(scored.metrics.estHoursRemainingHigh, undefined);
+  });
+
+  await test("the range is quotable and its template passes the guard", () => {
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: fullRarityMap(1) },
+      "completionist",
+    );
+    const quotable = quotableMetrics(scored);
+    // The linear figure stays suppressed; the range replaces it.
+    assert.equal(quotable.estHoursRemaining, undefined);
+    assert.ok(quotable.estHoursRemainingLow !== undefined);
+    assert.deepEqual(findUngroundedNumbers(templateReason(scored), quotable), []);
+    assert.match(templateReason(scored), /roughly [\d.]+h to [\d.]+h left/);
+  });
+
   // --- caveats must not undo the suppression ------------------------------
   // Regression, found auditing 42 games from a real library: the floor caveat
   // used to read "the 1.1h figure assumes average difficulty and does not
