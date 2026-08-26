@@ -71,8 +71,16 @@ const round = (value: number) => Math.round(value * 10) / 10;
  * is published data rather than an invented constant.
  *
  * Two weightings are used deliberately, because the right curve is unknowable:
- *   - `gentle` (-ln p) treats a 1%-unlock achievement as ~6.6x an average one
- *   - `steep`  (1/p)   treats it as ~50x
+ *   - `gentle` (-ln p)    treats a 1%-unlock achievement as ~6.6x an average one
+ *   - `steep`  (p^-1.5)  treats it as ~350x
+
+ * The steep exponent was 1 (a plain 1/p) and was widened after comparing both
+ * against real games: it put Hollow Knight's last achievement — unlocked by
+ * 5.3% of players, and one of the hardest in the game — at no more than 3.1h,
+ * and Sifu's remaining three at 1.8% at no more than 3.8h. Those upper bounds
+ * were not credible. 1.5 sits between logarithmic and inverse-square; -2 was
+ * rejected as too aggressive, since it handed 4 of Neon White's 63
+ * achievements 67% of the game's entire completionist time.
  * They bracket the plausible range, and the SPREAD between them is the honest
  * signal: wide spread means "we really don't know". Reporting one number here
  * would assert precision the data cannot support.
@@ -83,7 +91,7 @@ function effortWeights(percent: number): { gentle: number; steep: number } {
   // Clamped: Steam reports 0% for achievements nobody has unlocked, which would
   // divide by zero and make one achievement swamp the entire allocation.
   const p = Math.min(100, Math.max(RARITY_FLOOR_PERCENT, percent));
-  return { gentle: -Math.log(p / 100), steep: 1 / p };
+  return { gentle: -Math.log(p / 100), steep: Math.pow(p, -1.5) };
 }
 
 /**
@@ -291,7 +299,12 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     // the defensible number here, and naming the linear one would re-introduce
     // exactly the "about an hour" impression the range exists to correct.
     dataGaps.push(
-      `${left !== undefined ? `${left} achievement${left === 1 ? "" : "s"} left, ` : ""}unlocked by ${avgRarityUnearned}% of players. Rare achievements take far longer than average ones, so the estimate spreads the remaining completionist time by how scarce each one is — treat it as a range, not a figure.`,
+      // Deliberately terse. This fires on most cards in a typical answer, and
+      // the card already shows the range and the unlock rate right above it —
+      // a long paragraph repeating them turned every card into a wall of text.
+      left !== undefined
+        ? `${left} rare achievement${left === 1 ? "" : "s"} left, so this is a range rather than a figure.`
+        : "The achievements left are rare, so this is a range rather than a figure.",
     );
   } else if (remainingIsFloor && estHoursRemaining !== null) {
     const left = metrics.achievementsLeft;

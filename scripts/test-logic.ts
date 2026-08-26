@@ -502,6 +502,14 @@ async function main() {
       assert.equal(isCapacityError(capacity), true, `should retry: ${JSON.stringify(capacity)}`);
     }
 
+    // A status code must win over the message text: a permanent error whose
+    // wording happens to mention quota is still permanent.
+    assert.equal(
+      isCapacityError(Object.assign(new Error("quota details: see docs"), { statusCode: 400 })),
+      false,
+      "a 400 mentioning quota must not be retried elsewhere",
+    );
+
     for (const permanent of [
       { statusCode: 400 },
       { statusCode: 401 },

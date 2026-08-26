@@ -51,11 +51,18 @@ export function isCapacityError(error: unknown): boolean {
   if (typeof error !== "object" || error === null) return false;
 
   const status = (error as { statusCode?: unknown }).statusCode;
-  if (typeof status === "number" && CAPACITY_STATUSES.has(status)) return true;
+  if (typeof status === "number") {
+    // A status code is authoritative. Falling through to the message when one
+    // is present let a 400 whose text merely mentions "quota" be retried as a
+    // capacity problem — the opposite of this function's purpose.
+    return CAPACITY_STATUSES.has(status);
+  }
 
   const message = (error as { message?: unknown }).message;
   if (typeof message !== "string") return false;
-  return /\b(429|503)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|rate.?limit|quota|overloaded|high demand/i.test(
+  // No status to go on, so match only tokens that are unambiguous alone. Bare
+  // "quota" and "overloaded" were dropped: they turn up in permanent errors too.
+  return /\b(429|503)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|rate.?limit(?:ed)?|high demand/i.test(
     message,
   );
 }
