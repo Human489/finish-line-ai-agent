@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { cacheFor, pooled } from "../lib/cache";
+import { cacheFor, pooledSettled } from "../lib/cache";
 import {
   getAchievementProgress,
   getOwnedGames,
@@ -39,6 +39,7 @@ export default defineTool({
       neverStartedGames: number;
       gamesWithAchievements: number;
       alreadyPerfected: number;
+      failedLookups: number;
       candidates: { appid: number; name: string; achievementPercent: number | null }[];
     } | null;
   }) {
@@ -57,6 +58,7 @@ export default defineTool({
         neverStartedGames: summary.neverStartedGames,
         gamesWithAchievements: summary.gamesWithAchievements,
         alreadyPerfected: summary.alreadyPerfected,
+        failedLookups: summary.failedLookups,
         // Name, appid and completion only — enough to choose a shortlist.
         candidates: summary.candidates.slice(0, 20).map((game) => ({
           appid: game.appid,
@@ -90,7 +92,11 @@ export default defineTool({
     const recent: { name: string; percent: number | null }[] = [];
     let completed = 0;
 
-    const results = await pooled(played, CONCURRENCY, async (game) => {
+    // pooledSettled instead of pooled: one game's lookup rejecting (network
+    // blip, thrown error) must not take down a sweep that may already be
+    // hundreds of games deep. Rejections are filtered out below rather than
+    // treated as "no achievements".
+    const settled = await pooledSettled(played, CONCURRENCY, async (game) => {
       const cached = cache.achievements.get(game.appid) as
         | AchievementProgress
         | undefined;
@@ -105,6 +111,18 @@ export default defineTool({
 
       return { game, progress };
     });
+
+    const failedLookups = settled.filter((entry) => entry.status === "rejected").length;
+    // `completed` only counts workers that actually returned, so a rejection
+    // does not inflate the progress counter shown to the user.
+    completed -= failedLookups;
+
+    const results = settled
+      .filter(
+        (entry): entry is PromiseFulfilledResult<{ game: OwnedGame; progress: AchievementProgress }> =>
+          entry.status === "fulfilled",
+      )
+      .map((entry) => entry.value);
 
     // Snapshot after the pool drains. Intermediate yields inside the pool would
     // interleave unpredictably; eve treats snapshots as last-write-wins anyway.
@@ -141,10 +159,15 @@ export default defineTool({
         playedGames: played.length,
         neverStartedGames: neverStarted,
         gamesWithAchievements: withAchievements.length,
-        gamesWithoutAchievements: played.length - withAchievements.length,
+        gamesWithoutAchievements: played.length - withAchievements.length - failedLookups,
         alreadyPerfected: perfected.length,
+        failedLookups,
         candidates,
-        note: "Candidates are unfinished games ranked by achievement completion. Pass the interesting appids to score_backlog for hours-remaining and a verdict.",
+        note:
+          "Candidates are unfinished games ranked by achievement completion. Pass the interesting appids to score_backlog for hours-remaining and a verdict." +
+          (failedLookups > 0
+            ? ` ${failedLookups} game(s) could not be looked up and were skipped; the sweep is partial.`
+            : ""),
       },
     };
   },

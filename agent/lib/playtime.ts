@@ -45,21 +45,40 @@ type SearchToken = { token: string; hpKey: string; hpVal: string };
 /** Tokens are short-lived and IP/UA-bound; held for the process lifetime. */
 let cachedToken: SearchToken | null = null;
 
+/**
+ * Single-flight guard: concurrent callers who all see a missing/expired token
+ * (e.g. several sweep_achievements workers hitting a 403 at once) must await
+ * the SAME init request rather than each firing their own. Without this, a
+ * burst of concurrent searches turns one expired token into a burst of
+ * simultaneous re-inits against the endpoint most likely to rate-limit us.
+ */
+let inFlightInit: Promise<SearchToken | null> | null = null;
+
 async function initToken(): Promise<SearchToken | null> {
+  if (inFlightInit) return inFlightInit;
+
+  inFlightInit = (async () => {
+    try {
+      const response = await fetch(`${ORIGIN}/api/search/site/init?t=${Date.now()}`, {
+        headers: { "User-Agent": UA, Referer: `${ORIGIN}/` },
+        cache: "no-store",
+      });
+      if (!response.ok) return null;
+
+      const body = (await response.json()) as Partial<SearchToken>;
+      if (!body.token || !body.hpKey || !body.hpVal) return null;
+
+      cachedToken = { token: body.token, hpKey: body.hpKey, hpVal: body.hpVal };
+      return cachedToken;
+    } catch {
+      return null;
+    }
+  })();
+
   try {
-    const response = await fetch(`${ORIGIN}/api/search/site/init?t=${Date.now()}`, {
-      headers: { "User-Agent": UA, Referer: `${ORIGIN}/` },
-      cache: "no-store",
-    });
-    if (!response.ok) return null;
-
-    const body = (await response.json()) as Partial<SearchToken>;
-    if (!body.token || !body.hpKey || !body.hpVal) return null;
-
-    cachedToken = { token: body.token, hpKey: body.hpKey, hpVal: body.hpVal };
-    return cachedToken;
-  } catch {
-    return null;
+    return await inFlightInit;
+  } finally {
+    inFlightInit = null;
   }
 }
 
