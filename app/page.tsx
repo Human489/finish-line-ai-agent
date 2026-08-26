@@ -440,7 +440,16 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
 
 function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
   if (output.scored.length === 0) {
-    return <p className="p-3 text-sm text-muted-foreground">No games were scored.</p>;
+    // "No games were scored" on its own reads like a failure with no cause.
+    // Almost always the reason is right here in the output: every appid asked
+    // for was absent from the library.
+    return (
+      <p className="p-3 text-sm text-muted-foreground">
+        {output.unknownAppids.length > 0
+          ? `Nothing to show — ${output.unknownAppids.length === 1 ? "that game isn't" : "those games aren't"} in this library (appid ${output.unknownAppids.join(", ")}).`
+          : "No games were scored."}
+      </p>
+    );
   }
 
   return (

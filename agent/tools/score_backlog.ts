@@ -62,6 +62,7 @@ export default defineTool({
   toModelOutput(output: {
     mode: string;
     scored: (ScoredGame & { fallbackReason: string })[];
+    unknownAppids: number[];
     reasonRules: string;
   }) {
     return {
@@ -90,6 +91,10 @@ export default defineTool({
               game.facts.dataGaps.length > 0 ? game.facts.dataGaps : undefined,
           };
         }),
+        // Without this the model never learns an appid was rejected: it just
+        // gets fewer games back than it asked for, with no reason, and calls
+        // the tool again. The UI has always shown this; the model could not.
+        notInLibrary: output.unknownAppids.length > 0 ? output.unknownAppids : undefined,
         rules: output.reasonRules,
       },
     };
@@ -175,7 +180,7 @@ export default defineTool({
       })),
       unknownAppids: missing,
       reasonRules:
-        "Every game below is ALREADY shown to the player as a card with its name, category, numbers and Linux tier. Do not repeat any of that. Write one or two short sentences TOTAL naming your top pick and the single reason it beats the others — not one sentence per game, and no lists or headings. Any number you do mention must be one of that game's own values above. Never change a verdict.",
+        "Every game below is ALREADY shown to the player as a card with its name, category, numbers and Linux tier. Do not repeat any of that. Write one or two short sentences TOTAL naming your top pick and the single reason it beats the others — not one sentence per game, and no lists or headings. Any number you do mention must be one of that game's own values above. Never change a verdict. If notInLibrary is present, those appids are not owned by this player: do NOT call this tool again for them, and do not mention them — answer with the games you did get.",
     };
   },
 });
