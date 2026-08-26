@@ -15,6 +15,7 @@ import {
   rankGames,
   scoreGame,
   templateReason,
+  quotableMetrics,
   type Mode,
   type ScoredGame,
 } from "../lib/scoring";
@@ -27,12 +28,16 @@ import {
  * The category returned here is final. The model is not permitted to choose,
  * change or soften it — see instructions.md.
  */
-const MAX_GAMES = 20;
+// 10, not 20. Twenty cards is more than anyone reads, and the answer is one
+// recommendation — the extra fifteen are scrolling, not information. It also
+// halves the per-turn enrichment: score_backlog is the only tool that hits
+// HowLongToBeat, one request per game.
+const MAX_GAMES = 10;
 const CONCURRENCY = 5;
 
 export default defineTool({
   description:
-    "Score a shortlist of games and assign each a final category (Finish Line, Quick Win, Rarity Wall Ahead, Keep Going, Never Started, Long Haul, Proton-Blocked). This performs all the arithmetic. The category it returns is the verdict — never recompute or override it. Call this last.",
+    "Score a shortlist of games and assign each a final category (Finish Line, Quick Win, Rarity Wall Ahead, Keep Going, Never Started, Long Haul). This performs all the arithmetic. The category it returns is the verdict — never recompute or override it. Linux compatibility is returned alongside as context and is never a category. Call this last.",
   inputSchema: z.object({
     steamId: z.string().regex(/^\d{17}$/).describe("A 17-digit SteamID64."),
     appids: z
@@ -65,13 +70,26 @@ export default defineTool({
         mode: output.mode,
         // No fallbackReason here: it restates the card, and the model is now
         // told not to. It stays on the full output for the UI contract.
-        games: output.scored.map((game) => ({
-          name: game.name,
-          verdict: game.categoryLabel,
-          ...game.metrics,
-          proton: game.facts.protonTier,
-          caveats: game.facts.dataGaps.length > 0 ? game.facts.dataGaps : undefined,
-        })),
+        games: output.scored.map((game) => {
+          // Withholds the hours figure entirely when it is known not to hold.
+          // Telling the model "this is a minimum" was not enough — it still
+          // rendered as "just over an hour", which is the wrong impression.
+          // If it cannot see the number, it cannot quote it. Shared with the
+          // render-time grounding guard, so what the model may see and what it
+          // may be quoted saying cannot drift apart.
+          const shown = quotableMetrics(game);
+
+          return {
+            name: game.name,
+            verdict: game.categoryLabel,
+            ...shown,
+            proton: game.facts.protonTier,
+            hoursRemainingIsMinimumNotEstimate:
+              game.facts.remainingIsFloor || undefined,
+            caveats:
+              game.facts.dataGaps.length > 0 ? game.facts.dataGaps : undefined,
+          };
+        }),
         rules: output.reasonRules,
       },
     };
@@ -148,9 +166,11 @@ export default defineTool({
       mode,
       scored: ranked.map((game) => ({
         ...game,
-        // The numbers the model is allowed to quote for this game, and a
-        // ready-made sentence to fall back on.
-        allowedNumbers: Object.values(game.metrics),
+        // A ready-made sentence for the UI to show if the model says nothing.
+        // (There was an `allowedNumbers` array here too; toModelOutput never
+        // forwarded it and the UI never read it, so the model was being
+        // "given" numbers it could not see. The real allow-list is the
+        // quotableMetrics projection above.)
         fallbackReason: templateReason(game),
       })),
       unknownAppids: missing,

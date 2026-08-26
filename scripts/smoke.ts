@@ -47,6 +47,7 @@ async function main() {
       achievements: {
         appid: 367520,
         hasAchievements: true,
+        unknown: false,
         earned: 58,
         total: 63,
         percent: 92.1,
@@ -70,6 +71,7 @@ async function main() {
       achievements: {
         appid: 1,
         hasAchievements: true,
+        unknown: false,
         earned: 58,
         total: 63,
         percent: 92.1,
