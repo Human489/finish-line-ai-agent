@@ -70,6 +70,8 @@ The contract is **enforced at render, not requested**. `GroundedText` in `app/pa
 
 When adding a metric, add it to `scoring.ts` — never let the model derive one. Give its key a name containing `percent`, `rarity`, `hours` or `achievements`, or `unitFor()` will not know what unit it may be quoted in and will skip validating it.
 
+**`facts.dataGaps` is model-visible.** `toModelOutput` forwards it verbatim as `caveats`, so a caveat that quotes a number hands that number to the model no matter what `quotableMetrics` strips. This was a real leak: the floor caveat used to read "the 1.1h figure assumes average difficulty and does not hold", which both re-fed the model the withheld value and printed it on the card immediately below the line that replaced it. Write caveats that describe the problem without citing the figure.
+
 ### One source of truth for categories
 
 `agent/lib/categories.ts` holds the seven categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.

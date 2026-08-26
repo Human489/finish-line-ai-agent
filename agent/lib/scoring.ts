@@ -122,7 +122,10 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
   if (playtime?.source === "none") {
     dataGaps.push("No hours-to-beat data found for this game.");
   }
-  if (playtime?.note) {
+  // playtime.note carries its own "No HowLongToBeat data found" message for the
+  // same condition, which rendered as two caveats saying one thing. Only the
+  // note is skipped — a note about an inexact title match is still worth it.
+  else if (playtime?.note) {
     dataGaps.push(playtime.note);
   }
 
@@ -183,10 +186,17 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     const left = metrics.achievementsLeft;
     // State the facts rather than a stock adverb. How much longer it takes is
     // genuinely unknown — the rarity is the checkable part, so lead with it.
+    //
+    // Deliberately does NOT name the hours figure. An earlier version said
+    // "the 1.1h figure assumes average difficulty and does not hold", which
+    // undid the whole point: dataGaps are forwarded to the model as `caveats`,
+    // so quoting the number here handed back the very value quotableMetrics
+    // strips — and printed it on the card directly beneath the line that
+    // replaced it. A disclaimed number is still a number the reader takes away.
     dataGaps.push(
       left !== undefined
-        ? `Time remaining is unknown. ${left} achievement${left === 1 ? "" : "s"} left, unlocked by ${avgRarityUnearned}% of players; the ${estHoursRemaining}h figure assumes average difficulty and does not hold for achievements this rare.`
-        : `Time remaining is unknown: the achievements left are unlocked by ${avgRarityUnearned}% of players, so the ${estHoursRemaining}h figure does not hold.`,
+        ? `Time remaining is unknown. ${left} achievement${left === 1 ? "" : "s"} left, unlocked by ${avgRarityUnearned}% of players — far rarer than average, so an hours estimate based on average difficulty would understate it.`
+        : `Time remaining is unknown: the achievements left are unlocked by ${avgRarityUnearned}% of players, so any hours estimate based on average difficulty would understate it.`,
     );
   }
 

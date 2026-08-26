@@ -312,6 +312,67 @@ async function main() {
     assert.deepEqual(findUngroundedNumbers(sentence, quotableMetrics(walled)), [`${hours} hours`]);
   });
 
+  // --- caveats must not undo the suppression ------------------------------
+  // Regression, found auditing 42 games from a real library: the floor caveat
+  // used to read "the 1.1h figure assumes average difficulty and does not
+  // hold". dataGaps are forwarded to the model as `caveats`, so that handed
+  // back the exact value quotableMetrics strips — and printed it on the card
+  // directly under the line that replaced it.
+
+  await test("the floor caveat never names the suppressed hours figure", () => {
+    const walled = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
+      "completionist",
+    );
+    const hours = walled.metrics.estHoursRemaining;
+    assert.equal(walled.facts.remainingIsFloor, true);
+    assert.ok(hours !== undefined, "fixture must produce an hours figure to suppress");
+
+    const caveats = walled.facts.dataGaps.join(" ");
+    assert.ok(
+      !caveats.includes(`${hours}h`),
+      `caveat must not quote the withheld figure; got: ${caveats}`,
+    );
+    // And nothing in the caveats may trip the guard against the quotable set.
+    assert.deepEqual(findUngroundedNumbers(caveats, quotableMetrics(walled)), []);
+  });
+
+  await test("a game with no playtime data gets one caveat, not two", () => {
+    const scored = scoreGame(
+      {
+        ...base,
+        achievements: achievements(),
+        playtime: {
+          hoursToBeat: null,
+          hoursTo100: null,
+          source: "none",
+          matchedName: null,
+          note: "No HowLongToBeat data found for this game.",
+        },
+        rarity: COMMON,
+      },
+      "completionist",
+    );
+    const aboutPlaytime = scored.facts.dataGaps.filter((gap) => /hours-to-beat|HowLongToBeat/i.test(gap));
+    assert.equal(aboutPlaytime.length, 1, `expected one playtime caveat, got ${JSON.stringify(aboutPlaytime)}`);
+  });
+
+  await test("an inexact title match is still surfaced", () => {
+    const scored = scoreGame(
+      {
+        ...base,
+        achievements: achievements(),
+        playtime: playtime({ matchedName: "Some Other Game", note: 'Matched to "Some Other Game" on HowLongToBeat, which is not an exact title match.' }),
+        rarity: COMMON,
+      },
+      "completionist",
+    );
+    assert.ok(
+      scored.facts.dataGaps.some((gap) => /not an exact title match/.test(gap)),
+      "a fuzzy-match warning must never be swallowed by the dedupe",
+    );
+  });
+
   // --- pooledSettled must isolate failures --------------------------------
   // Regression: pooled() used Promise.all, so one rejected lookup aborted the
   // whole achievement sweep after hundreds of successful ones.
