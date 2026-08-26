@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { pooledSettled } from "../agent/lib/cache";
+import { isCapacityError, withModelFallback } from "../agent/lib/model-fallback";
 import { CATEGORY_LABELS, THRESHOLDS, type Category } from "../agent/lib/categories";
 import type { AchievementProgress } from "../agent/lib/steam";
 import type { PlaytimeEstimate } from "../agent/lib/playtime";
@@ -482,6 +483,117 @@ async function main() {
       scored.facts.dataGaps.some((gap) => /not an exact title match/.test(gap)),
       "a fuzzy-match warning must never be swallowed by the dedupe",
     );
+  });
+
+  // --- model fallback on rate limit ---------------------------------------
+  // The free Gemini tier returns 429 (quota) and 503 (high demand), both
+  // transient and both survivable by asking a different model. A real 429
+  // cannot be summoned on demand, so the decision logic is tested directly.
+
+  await test("capacity errors are recognised, request errors are not", () => {
+    for (const capacity of [
+      { statusCode: 429 },
+      { statusCode: 503 },
+      new Error("[429] RESOURCE_EXHAUSTED: quota exceeded"),
+      new Error("This model is currently experiencing high demand."),
+      new Error("UNAVAILABLE"),
+    ]) {
+      assert.equal(isCapacityError(capacity), true, `should retry: ${JSON.stringify(capacity)}`);
+    }
+
+    for (const permanent of [
+      { statusCode: 400 },
+      { statusCode: 401 },
+      { statusCode: 404 },
+      new Error("Invalid JSON payload received"),
+      new Error("API key not valid"),
+      null,
+      undefined,
+      "boom",
+    ]) {
+      assert.equal(
+        isCapacityError(permanent),
+        false,
+        `must NOT silently re-send to another model: ${JSON.stringify(permanent)}`,
+      );
+    }
+  });
+
+  // Minimal stand-ins for a provider model: only the members the middleware
+  // touches. Cast because a full LanguageModelV4 is far larger than this needs.
+  const stubModel = (modelId: string, behaviour: () => unknown) =>
+    ({
+      specificationVersion: "v4",
+      provider: "test",
+      modelId,
+      supportedUrls: {},
+      doGenerate: async () => behaviour(),
+      doStream: async () => behaviour(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any;
+
+  const rateLimited = (id: string) =>
+    stubModel(id, () => {
+      throw Object.assign(new Error("rate limited"), { statusCode: 429 });
+    });
+  const healthy = (id: string) => stubModel(id, () => ({ servedBy: id }));
+
+  await test("a rate-limited primary falls through to a healthy model", async () => {
+    const notices: string[] = [];
+    const model = withModelFallback(
+      [rateLimited("primary"), healthy("backup")],
+      (info) => notices.push(`${info.from}->${info.to}`),
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (await (model as any).doGenerate({})) as { servedBy: string };
+    assert.equal(result.servedBy, "backup");
+    assert.deepEqual(notices, ["primary->backup"], "a fallback must never be silent");
+  });
+
+  await test("it walks the whole chain, in order", async () => {
+    const model = withModelFallback(
+      [rateLimited("primary"), rateLimited("second"), healthy("third")],
+      () => {},
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (await (model as any).doGenerate({})) as { servedBy: string };
+    assert.equal(result.servedBy, "third");
+  });
+
+  await test("a request error is raised immediately, not retried elsewhere", async () => {
+    let backupCalls = 0;
+    const backup = stubModel("backup", () => {
+      backupCalls += 1;
+      return { servedBy: "backup" };
+    });
+    const model = withModelFallback(
+      [
+        stubModel("primary", () => {
+          throw Object.assign(new Error("Invalid argument"), { statusCode: 400 });
+        }),
+        backup,
+      ],
+      () => {},
+    );
+
+    await assert.rejects(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (model as any).doGenerate({}),
+      /Invalid argument/,
+    );
+    assert.equal(backupCalls, 0, "a malformed request must not be re-sent to another model");
+  });
+
+  await test("when everything is rate limited the error still surfaces", async () => {
+    const model = withModelFallback([rateLimited("a"), rateLimited("b")], () => {});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await assert.rejects(() => (model as any).doGenerate({}), /rate limited/);
+  });
+
+  await test("a single model is returned unwrapped", () => {
+    const only = healthy("solo");
+    assert.equal(withModelFallback([only]), only);
   });
 
   // --- pooledSettled must isolate failures --------------------------------

@@ -215,14 +215,30 @@ const titleCase = (value: string) =>
  * shared.cloudflare.steamstatic.com store_item_assets host, which
  * 301-redirects instead of serving the file directly.
  */
-const artworkUrl = (appid: number) =>
-  `https://cdn.akamai.steamstatic.com/steam/apps/${appid}/library_600x900.jpg`;
+const ART_HOST = "https://cdn.akamai.steamstatic.com/steam/apps";
+
+/**
+ * Tried in order, because no single filename covers the whole store. Rhythia
+ * (appid 2250500) is the case that proved it: it 404s on library_600x900.jpg,
+ * header.jpg AND both capsule sizes, yet serves library_hero.jpg fine. Valve
+ * does not guarantee any particular asset exists for a given app, so the only
+ * robust approach is to walk candidates and fall back to text.
+ *
+ * Portrait first because it is what the 4:5 frame is shaped for; the last two
+ * are landscape and get cropped by object-cover, which still reads as the
+ * game's art and beats an empty box.
+ */
+const artworkCandidates = (appid: number) => [
+  `${ART_HOST}/${appid}/library_600x900.jpg`,
+  `${ART_HOST}/${appid}/header.jpg`,
+  `${ART_HOST}/${appid}/library_hero.jpg`,
+];
 
 /**
  * The image is decorative — the name is already real, selectable text right
  * below it — so alt="" rather than duplicating the name into alt text.
  *
- * aspect-[2/3] reserves the known 600x900 ratio before the image has
+ * aspect-4/5 reserves a fixed ratio before the image has
  * loaded (or if it 404s and falls back), so the grid's row heights don't
  * jump once artwork starts arriving. onError swaps to a flat placeholder
  * that still shows the name legibly instead of leaving a broken-image icon
@@ -230,11 +246,15 @@ const artworkUrl = (appid: number) =>
  * hole in the grid instead of a same-sized placeholder.
  */
 function GameArtwork({ appid, name }: { appid: number; name: string }) {
-  const [failed, setFailed] = useState(false);
+  // Index into artworkCandidates; past the end means every source 404'd and
+  // the text placeholder takes over.
+  const [candidate, setCandidate] = useState(0);
+  const sources = artworkCandidates(appid);
+  const src = sources[candidate];
 
   return (
     <div className="relative aspect-4/5 w-full overflow-hidden rounded-md bg-muted">
-      {failed ? (
+      {src === undefined ? (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           {name}
         </div>
@@ -249,11 +269,12 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
          */
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={artworkUrl(appid)}
+          key={src}
+          src={src}
           alt=""
           loading="lazy"
           className="h-full w-full object-cover"
-          onError={() => setFailed(true)}
+          onError={() => setCandidate((n) => n + 1)}
         />
       )}
     </div>

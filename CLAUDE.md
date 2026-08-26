@@ -106,6 +106,25 @@ When adding a metric, add it to `scoring.ts` — never let the model derive one.
 
 **`facts.dataGaps` is model-visible.** `toModelOutput` forwards it verbatim as `caveats`, so a caveat that quotes a number hands that number to the model no matter what `quotableMetrics` strips. This was a real leak: the floor caveat used to read "the 1.1h figure assumes average difficulty and does not hold", which both re-fed the model the withheld value and printed it on the card immediately below the line that replaced it. Write caveats that describe the problem without citing the figure.
 
+### Model fallback on rate limits
+
+The free Gemini tier fails two ways that are transient and not the app's fault: `429 RESOURCE_EXHAUSTED` (per-minute or per-day cap) and `503 UNAVAILABLE` ("high demand"). Both were seen here — `gemini-3.5-flash-lite` returned 503 for a stretch while `gemini-3.5-flash` and `gemini-3.6-flash` answered normally throughout.
+
+`agent/lib/model-fallback.ts` wraps the primary so a capacity error retries against the next model instead of killing the turn. Order is flash-lite → 3.5-flash → 3.6-flash, with 3.6 last because its free tier caps at 20 requests/day.
+
+Two design points that are easy to get wrong:
+
+- **It is a middleware, not a `defineDynamic` resolver.** The resolver picks the model *before* the provider call, so it cannot see a 429 — a resolver that throws just fails the turn. The AI SDK middleware wraps `doGenerate`/`doStream`, which is the only place the error is catchable. The resolver is still used, because eve only accepts a live `LanguageModel` object (rather than a model-id string) from the `step.started` scope.
+- **Only capacity errors retry.** A 400 or a bad key will not do better elsewhere, and silently re-sending a malformed prompt to three models triples the cost of a real bug. A test pins that a 400 never reaches the backup.
+
+The wrapper is built once at module scope; rebuilding it per step would discard the provider's prompt cache every time. Note that a fallback re-ingests the conversation uncached anyway — it is the right trade against failing, but a reason not to reorder the chain casually.
+
+### Game artwork has no single reliable URL
+
+Cards pull art straight from Valve's CDN (`cdn.akamai.steamstatic.com/steam/apps/{appid}/...`) with no API call. **No filename is guaranteed to exist.** Rhythia (appid 2250500) proves it: it 404s on `library_600x900.jpg`, `header.jpg` *and* both capsule sizes, yet serves `library_hero.jpg` fine.
+
+So `artworkCandidates()` walks portrait → header → hero, advancing on each `onError`, and falls back to the game's name as text. Portrait first because the frame is shaped for it; the later two are landscape and get cropped by `object-cover`, which still reads as the game's art. Do not collapse this back to one URL.
+
 ### One source of truth for categories
 
 `agent/lib/categories.ts` holds the six categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.
