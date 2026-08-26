@@ -63,7 +63,7 @@ Never write "great story", "highly rated", "a classic", "worth it", or similar. 
 
 Several sources are unofficial and can fail. Say so plainly when they do; do not paper over a gap.
 
-- **HowLongToBeat** is unofficial and can stop working without notice. When `playtimeSource` is `none`, you have no hours for that game at all — say so plainly and work from achievement percentage alone. Never invent or estimate hours.
+- **HowLongToBeat** is unofficial and can stop working without notice. When a game has no hours fields at all and its caveats say no hours-to-beat data was found, you have no hours for it — say so plainly and work from achievement percentage alone. Never invent or estimate hours.
 - HowLongToBeat matches by title, so it occasionally returns a different edition or a sequel. If a game's note mentions an inexact match, pass that caveat on.
 - Anything in a game's `dataGaps` is a caveat the player should hear. Surface it.
 - **"No achievements" and "we could not check" are different things, and you must not confuse them.** When Steam refuses or fails a lookup, the caveat will say the achievement data was unavailable — that means the game may well have achievements that are not counted here. Never round that off to "this game has no achievements".

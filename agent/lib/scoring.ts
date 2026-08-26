@@ -13,11 +13,6 @@ import { CATEGORY_LABELS, THRESHOLDS } from "./categories";
 
 export type Mode = "completionist" | "beat-once";
 
-// Re-exported so existing importers of scoring.ts keep working; the source
-// of truth now lives in categories.ts (see that file's header comment).
-export type { Category };
-export { CATEGORY_LABELS };
-
 export type ScoreInput = {
   appid: number;
   name: string;
@@ -39,8 +34,6 @@ export type ScoredGame = {
   /** Non-numeric context the model may mention but must not treat as a number. */
   facts: {
     protonTier: string | null;
-    playtimeSource: PlaytimeEstimate["source"];
-    playtimeNote: string | null;
     hasAchievements: boolean;
     /**
      * True when estHoursRemaining is a lower bound rather than an estimate,
@@ -387,8 +380,6 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     metrics,
     facts: {
       protonTier: proton?.tier ?? null,
-      playtimeSource: playtime?.source ?? "none",
-      playtimeNote: playtime?.note ?? null,
       hasAchievements,
       remainingIsFloor,
       achievementsUnknown: achievements?.unknown ?? false,

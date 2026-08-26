@@ -166,9 +166,11 @@ export default defineTool({
       mode,
       scored: ranked.map((game) => ({
         ...game,
-        // The numbers the model is allowed to quote for this game, and a
-        // ready-made sentence to fall back on.
-        allowedNumbers: Object.values(quotableMetrics(game)),
+        // A ready-made sentence for the UI to show if the model says nothing.
+        // (There was an `allowedNumbers` array here too; toModelOutput never
+        // forwarded it and the UI never read it, so the model was being
+        // "given" numbers it could not see. The real allow-list is the
+        // quotableMetrics projection above.)
         fallbackReason: templateReason(game),
       })),
       unknownAppids: missing,

@@ -182,16 +182,16 @@ type ScoreBacklogOutput = {
   unknownAppids: number[];
 };
 
-/** Short forms — these read inline on one line, not as column headings. */
+/**
+ * Short forms for the supporting figures line — these read inline, not as
+ * column headings. Only SECONDARY_METRICS keys are ever looked up here; the
+ * headline figures (progress, hours left, rarity) are laid out by hand above,
+ * so labels for them were dead entries and are gone.
+ */
 const METRIC_LABELS: Record<string, string> = {
-  achievementPercent: "Achievements",
-  estHoursRemaining: "left",
   hoursToBeat: "to beat",
   hoursTo100: "to 100%",
-  avgRarityUnearned: "rarity",
   hoursPlayed: "played",
-  overinvestmentRatio: "Overinvestment",
-  storyProgressPercent: "Story progress",
 };
 
 function formatMetric(key: string, value: number): string {
@@ -661,9 +661,8 @@ function FallbackAnswer({ output }: { output: ScoreBacklogOutput }) {
  *
  * scoring.ts computes every number and the model is only ever allowed to
  * narrate them. Until now that was enforced by asking nicely: instructions.md
- * says so, score_backlog ships an `allowedNumbers` array per game, and the
- * model was trusted to police itself — which CLAUDE.md already records it does
- * not reliably do.
+ * says so, and the model was trusted to police itself — which CLAUDE.md
+ * already records it does not reliably do.
  *
  * It cannot be enforced on the server. eve's hooks are observe-only and fire
  * after the text is durably persisted and already streaming, and their one
