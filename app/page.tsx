@@ -4,6 +4,12 @@ import type { EveMessage } from "eve/client";
 import { useEveAgent } from "eve/react";
 import { useState, type FormEvent } from "react";
 import {
+  CATEGORY_LABELS,
+  CATEGORY_DESCRIPTIONS,
+  type Category,
+} from "@/agent/lib/categories";
+import { findUngroundedNumbers, type ScoredGame } from "@/agent/lib/scoring";
+import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
@@ -28,57 +34,47 @@ import {
 } from "@/components/ui/popover";
 
 /**
- * The seven categories score_backlog can assign, kept here rather than
- * imported from agent/lib/scoring.ts (server-only code) so the legend can't
- * silently drift — this list is checked against that file whenever either
- * changes.
+ * The seven categories score_backlog can assign. Labels and descriptions
+ * come from agent/lib/categories.ts — the single source of truth, imported
+ * above — so they can no longer drift from scoring.ts the way they did
+ * before (Quick Win's stated definition not matching what scoreGame actually
+ * awarded). Only the Tailwind classes stay local: they are presentational
+ * and have no server-side equivalent to drift from.
  */
-const CATEGORIES: { label: string; description: string; className: string }[] = [
-  {
-    label: "Finish Line",
-    description: "60%+ done, about five hours or less left. The best use of a session.",
-    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  },
-  {
-    label: "Quick Win",
-    description: "Completable in eight hours or less.",
-    className: "bg-sky-500/15 text-sky-700 dark:text-sky-400",
-  },
-  {
-    label: "Rarity Wall Ahead",
-    description:
-      "The achievements you have left are ones very few players ever unlock, so the last stretch will be a real grind. A warning, not a reason to give up.",
-    // amber-800, not -700: at badge size -700 measured 4.48:1 on the light
-    // card, just under the 4.5 needed for small text.
-    className: "bg-amber-500/15 text-amber-800 dark:text-amber-400",
-  },
-  {
-    label: "Keep Going",
-    description: "Started, real progress, more to do.",
-    className: "bg-violet-500/15 text-violet-700 dark:text-violet-400",
-  },
-  {
-    label: "Never Started",
-    // Not bg-muted: in dark mode --muted is #151515, the same value as the
-    // card background, so the badge disappeared entirely.
-    description: "Owned, never launched.",
-    className: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
-  },
-  {
-    label: "Long Haul",
-    description: "More than thirty hours remaining.",
-    // orange-800 for the same reason as amber above (-700 measured 4.43:1).
-    className: "bg-orange-500/15 text-orange-800 dark:text-orange-400",
-  },
-  {
-    label: "Proton-Blocked",
-    // Not text-destructive: that token is #ff7b72 in both themes, which is
-    // too pale to read on a light background. Same per-theme pattern as the
-    // other badges instead.
-    description: "Reported as not working on Linux / Steam Deck (ProtonDB rates it \"Borked\").",
-    className: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
-  },
+const CATEGORY_ORDER: Category[] = [
+  "finish-line",
+  "quick-win",
+  "rarity-wall-ahead",
+  "keep-going",
+  "never-started",
+  "long-haul",
+  "proton-blocked",
 ];
+
+const CATEGORY_CLASSNAMES: Record<Category, string> = {
+  "finish-line": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  "quick-win": "bg-sky-500/15 text-sky-700 dark:text-sky-400",
+  // amber-800, not -700: at badge size -700 measured 4.48:1 on the light
+  // card, just under the 4.5 needed for small text.
+  "rarity-wall-ahead": "bg-amber-500/15 text-amber-800 dark:text-amber-400",
+  "keep-going": "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+  // Not bg-muted: in dark mode --muted is #151515, the same value as the
+  // card background, so the badge disappeared entirely.
+  "never-started": "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
+  // orange-800 for the same reason as amber above (-700 measured 4.43:1).
+  "long-haul": "bg-orange-500/15 text-orange-800 dark:text-orange-400",
+  // Not text-destructive: that token is #ff7b72 in both themes, which is
+  // too pale to read on a light background. Same per-theme pattern as the
+  // other badges instead.
+  "proton-blocked": "bg-rose-500/15 text-rose-700 dark:text-rose-400",
+};
+
+const CATEGORIES: { label: string; description: string; className: string }[] =
+  CATEGORY_ORDER.map((category) => ({
+    label: CATEGORY_LABELS[category],
+    description: CATEGORY_DESCRIPTIONS[category],
+    className: CATEGORY_CLASSNAMES[category],
+  }));
 
 const CATEGORY_STYLE = new Map(CATEGORIES.map((c) => [c.label, c.className]));
 
@@ -167,23 +163,22 @@ function SweepProgress({ output }: { output: SweepSnapshot }) {
 }
 
 /**
- * Shape of one score_backlog result. Kept in sync with the return type of
- * `execute()` in agent/tools/score_backlog.ts — `part.output` carries the
- * full object regardless of what toModelOutput trims for the model, per
- * eve's docs ("Channel event handlers and hooks still get the full output").
+ * Shape of one score_backlog result. Derived from ScoredGame (the type
+ * scoring.ts actually produces) rather than hand-mirrored, so the UI cannot
+ * silently drift from what execute() returns. scoring.ts is pure and only
+ * `import type`s from its neighbours, so pulling types (never values) from it
+ * into this client component is fully erased at compile time.
+ *
+ * `fallbackReason` is added locally: it does not exist on ScoredGame itself
+ * (scoring.ts computes it, score_backlog.ts's execute() attaches it — see
+ * templateReason() in agent/lib/scoring.ts).
  */
-type ScoredGameResult = {
-  appid: number;
-  name: string;
-  categoryLabel: string;
-  metrics: Record<string, number>;
-  facts: {
-    protonTier: string | null;
-    hasAchievements: boolean;
+type ScoredGameResult = Pick<ScoredGame, "appid" | "name" | "categoryLabel" | "metrics"> & {
+  facts: Pick<ScoredGame["facts"], "protonTier" | "hasAchievements" | "achievementsUnknown" | "dataGaps"> & {
     /** estHoursRemaining is a lower bound, not an estimate. */
     remainingIsFloor?: boolean;
-    dataGaps: string[];
   };
+  fallbackReason: string;
 };
 
 type ScoreBacklogOutput = {
@@ -318,9 +313,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
 
       {(secondary.length > 0 || !facts.hasAchievements) && (
         <p className="mt-1.5 text-xs text-muted-foreground">
-          {[...secondary, ...(facts.hasAchievements ? [] : ["no achievements"])].join(
-            " · ",
-          )}
+          {[
+            ...secondary,
+            // achievementsUnknown means Steam never confirmed either way —
+            // "no achievements" would assert a fact we don't actually have.
+            ...(facts.hasAchievements
+              ? []
+              : [facts.achievementsUnknown ? "achievement data unavailable" : "no achievements"]),
+          ].join(" · ")}
         </p>
       )}
 
@@ -345,6 +345,17 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
       {output.scored.map((game) => (
         <GameResultCard key={game.appid} game={game} />
       ))}
+      {output.unknownAppids.length > 0 && (
+        // Matches the dataGaps styling on a card: quiet, muted, not an error.
+        // We only have the raw appids here, not names — score_backlog found
+        // them absent from the library before it could look up anything else
+        // about them — so the wording stays honest about that limit.
+        <p className="text-xs text-muted-foreground">
+          {output.unknownAppids.length === 1
+            ? `1 requested appid (${output.unknownAppids[0]}) isn't in this library and was skipped.`
+            : `${output.unknownAppids.length} requested appids (${output.unknownAppids.join(", ")}) aren't in this library and were skipped.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -508,6 +519,87 @@ function InputRequestCard({
  * level as the model's own text because it IS the answer, not a log of how
  * the model got there.
  */
+/**
+ * The written half of the answer, guaranteed even when the model emits no
+ * text at all — see CLAUDE.md's determinism contract: "templateReason()
+ * exists so the app still works correctly with zero useful LLM output." That
+ * guarantee did not actually hold in the UI before this: fallbackReason was
+ * computed, deliberately withheld from the model, and then never rendered
+ * anywhere, so a silent model turn left the user with cards and no sentence.
+ *
+ * Shows only the top-ranked game's fallback line (scored is already
+ * rank-ordered, best first) rather than one line per game — instructions.md
+ * is emphatic that the written answer must not restate the cards, and a
+ * per-game list would do exactly that.
+ */
+function FallbackAnswer({ output }: { output: ScoreBacklogOutput }) {
+  const top = output.scored[0];
+  if (!top) return null;
+
+  return <MessageResponse>{top.fallbackReason}</MessageResponse>;
+}
+
+/**
+ * The determinism contract, actually enforced.
+ *
+ * scoring.ts computes every number and the model is only ever allowed to
+ * narrate them. Until now that was enforced by asking nicely: instructions.md
+ * says so, score_backlog ships an `allowedNumbers` array per game, and the
+ * model was trusted to police itself — which CLAUDE.md already records it does
+ * not reliably do.
+ *
+ * It cannot be enforced on the server. eve's hooks are observe-only and fire
+ * after the text is durably persisted and already streaming, and their one
+ * escalation is to throw, which fails the whole turn rather than substituting
+ * the safe sentence. So the check lands here, at render, which is the first
+ * point that has both the model's prose AND the full untrimmed tool output —
+ * `toModelOutput` withholds data from the model, but the UI still receives
+ * everything on `part.output`.
+ *
+ * If the prose asserts a statistic the scorer never produced, it is replaced
+ * wholesale by the deterministic sentence rather than shown with a warning:
+ * a fabricated figure is the one failure this project exists to prevent, and
+ * a hedge next to a wrong number still leaves the number on screen.
+ *
+ * Caveat worth knowing: this protects this UI only. The ungrounded text still
+ * exists in the durable transcript and would reach any other consumer of the
+ * session unfiltered.
+ */
+function GroundedText({
+  text,
+  output,
+  streaming,
+}: {
+  text: string;
+  output: ScoreBacklogOutput | undefined;
+  streaming: boolean;
+}) {
+  // Never judge a half-written sentence — a number is routinely ungrounded
+  // for the moment between its first digit and its last.
+  if (streaming || !output) {
+    return <MessageResponse>{text}</MessageResponse>;
+  }
+
+  // Checked against every game in the shortlist, not just the top one: the
+  // model is asked for a comparative sentence ("Sifu beats Terraria's 33h"),
+  // so a figure belonging to any scored game is legitimately grounded.
+  const ungrounded = findUngroundedNumbers(
+    text,
+    output.scored.map((game) => game.metrics),
+  );
+
+  if (ungrounded.length === 0) {
+    return <MessageResponse>{text}</MessageResponse>;
+  }
+
+  const top = output.scored[0];
+  return (
+    <MessageResponse>
+      {top ? top.fallbackReason : "That answer could not be verified against the data."}
+    </MessageResponse>
+  );
+}
+
 function ScoreBacklogAnswer({ part }: { part: DynamicToolPart }) {
   const output = part.output as ScoreBacklogOutput | undefined;
 
@@ -804,18 +896,51 @@ export default function Home() {
                 const isComposing =
                   isBusy && isLastMessage && message.role === "assistant" && !hasVisibleText;
 
+                // The fallback sentence only belongs on screen once the turn
+                // has genuinely finished with nothing else said — rendering
+                // it while still streaming would mean the real answer, when
+                // it does arrive, replaces a flicker of fallback text. Reuses
+                // isBusy/isComposing rather than tracking a second notion of
+                // "done", so this and the shimmer above can never disagree
+                // about whether the turn is still in flight.
+                const showFallback =
+                  !isBusy && isLastMessage && message.role === "assistant" && !hasVisibleText && !isComposing;
+
+                // This turn's scored games, if it scored any. Needed whether or
+                // not the model went silent: with no text it supplies the
+                // fallback sentence, and with text it supplies the numbers that
+                // text is checked against.
+                const scoreOutput = dedupeParts(message.parts).find(
+                  (part): part is DynamicToolPart =>
+                    part.type === "dynamic-tool" &&
+                    part.toolName === "score_backlog" &&
+                    part.state === "output-available" &&
+                    Array.isArray((part.output as ScoreBacklogOutput | undefined)?.scored) &&
+                    ((part.output as ScoreBacklogOutput).scored.length > 0),
+                )?.output as ScoreBacklogOutput | undefined;
+
+                const fallbackOutput = showFallback ? scoreOutput : undefined;
+
                 return (
                   <Message key={message.id} from={message.role}>
                     <MessageContent>
                       {dedupeParts(message.parts).map((part, index) => {
                         if (part.type === "text") {
-                          const text =
-                            message.role === "user"
-                              ? part.text.replace(ID_PREFIX, "")
-                              : part.text;
+                          if (message.role === "user") {
+                            return (
+                              <MessageResponse key={index}>
+                                {part.text.replace(ID_PREFIX, "")}
+                              </MessageResponse>
+                            );
+                          }
 
                           return (
-                            <MessageResponse key={index}>{text}</MessageResponse>
+                            <GroundedText
+                              key={index}
+                              text={part.text}
+                              output={scoreOutput}
+                              streaming={isBusy && isLastMessage}
+                            />
                           );
                         }
 
@@ -846,6 +971,7 @@ export default function Home() {
                       {isComposing && (
                         <Shimmer className="text-sm">Working out the answer…</Shimmer>
                       )}
+                      {fallbackOutput && <FallbackAnswer output={fallbackOutput} />}
                     </MessageContent>
                   </Message>
                 );
