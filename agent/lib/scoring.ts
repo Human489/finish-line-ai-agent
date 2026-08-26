@@ -54,6 +54,12 @@ export type ScoredGame = {
     playtimeSource: PlaytimeEstimate["source"];
     playtimeNote: string | null;
     hasAchievements: boolean;
+    /**
+     * True when estHoursRemaining is a lower bound rather than an estimate,
+     * because the achievements left are rare enough that linear extrapolation
+     * understates the real effort. Must be shown as "at least", never as "~".
+     */
+    remainingIsFloor: boolean;
     dataGaps: string[];
   };
 };
@@ -95,6 +101,9 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     metrics.achievementPercent = achievements.percent ?? 0;
     metrics.achievementsEarned = achievements.earned;
     metrics.achievementsTotal = achievements.total;
+    // Concrete and checkable — this is what gets shown when the hours figure
+    // is known to be unreliable.
+    metrics.achievementsLeft = achievements.total - achievements.earned;
   } else {
     dataGaps.push(
       "This game has no Steam achievements, so it is scored on story completion only.",
@@ -135,7 +144,28 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     metrics.storyProgressPercent = progressPercent;
   }
 
+  const avgRarityUnearned = meanRarityOfUnearned(achievements, rarity);
+  if (avgRarityUnearned !== null) metrics.avgRarityUnearned = avgRarityUnearned;
+
+  /*
+   * Remaining time is extrapolated linearly: if you are 95% of the way through
+   * the achievements, this assumes 5% of the completionist time is left.
+   *
+   * That assumes every remaining achievement costs about what an average one
+   * did, which is only true while what is left is commonly unlocked. In a
+   * completionist run the last few achievements are usually the hardest by a
+   * wide margin, so for a game like Sifu — 95% done, but the remainder unlocked
+   * by under 2% of players — linear extrapolation produces a confidently wrong
+   * "about an hour" for what is realistically many times that.
+   *
+   * We cannot know the real figure: no source publishes per-achievement
+   * difficulty. So rather than invent a multiplier, the number is treated as a
+   * FLOOR whenever the remaining achievements are rare, and labelled as such
+   * everywhere it is shown.
+   */
   let estHoursRemaining: number | null = null;
+  let remainingIsFloor = false;
+
   if (
     effectiveMode === "completionist" &&
     fullCompletionHours !== null &&
@@ -144,13 +174,24 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     estHoursRemaining = round(
       Math.max(0, fullCompletionHours * ((100 - progressPercent) / 100)),
     );
+    // Below ~10% global unlock, linear extrapolation reliably understates.
+    remainingIsFloor = avgRarityUnearned !== null && avgRarityUnearned < 10;
   } else if (hoursToBeat !== null) {
     estHoursRemaining = round(Math.max(0, hoursToBeat - input.hoursPlayed));
   }
+
   if (estHoursRemaining !== null) metrics.estHoursRemaining = estHoursRemaining;
 
-  const avgRarityUnearned = meanRarityOfUnearned(achievements, rarity);
-  if (avgRarityUnearned !== null) metrics.avgRarityUnearned = avgRarityUnearned;
+  if (remainingIsFloor && estHoursRemaining !== null) {
+    const left = metrics.achievementsLeft;
+    // State the facts rather than a stock adverb. How much longer it takes is
+    // genuinely unknown — the rarity is the checkable part, so lead with it.
+    dataGaps.push(
+      left !== undefined
+        ? `Time remaining is unknown. ${left} achievement${left === 1 ? "" : "s"} left, unlocked by ${avgRarityUnearned}% of players; the ${estHoursRemaining}h figure assumes average difficulty and does not hold for achievements this rare.`
+        : `Time remaining is unknown: the achievements left are unlocked by ${avgRarityUnearned}% of players, so the ${estHoursRemaining}h figure does not hold.`,
+    );
+  }
 
   const overinvestment =
     hoursToBeat !== null && hoursToBeat > 0
@@ -202,6 +243,7 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
       playtimeSource: playtime?.source ?? "none",
       playtimeNote: playtime?.note ?? null,
       hasAchievements,
+      remainingIsFloor,
       dataGaps,
     },
   };
@@ -260,7 +302,11 @@ export function templateReason(game: ScoredGame): string {
   if (metrics.achievementPercent !== undefined) {
     parts.push(`${metrics.achievementPercent}% achievements`);
   }
-  if (metrics.estHoursRemaining !== undefined) {
+  if (game.facts.remainingIsFloor && metrics.achievementsLeft !== undefined) {
+    // Deliberately no hours figure: it is known not to hold here.
+    const left = metrics.achievementsLeft;
+    parts.push(`${left} rare achievement${left === 1 ? "" : "s"} left`);
+  } else if (metrics.estHoursRemaining !== undefined) {
     parts.push(`~${metrics.estHoursRemaining}h left`);
   }
   if (metrics.avgRarityUnearned !== undefined) {

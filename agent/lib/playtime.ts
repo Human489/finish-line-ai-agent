@@ -63,10 +63,24 @@ async function initToken(): Promise<SearchToken | null> {
   }
 }
 
+/**
+ * Steam ships legal decoration in game names that HowLongToBeat does not:
+ * "STAR WARS™ Republic Commando", "Tom Clancy's The Division®". Searching for
+ * the literal token `WARS™` matches nothing, so the game silently came back
+ * with no hours at all. Strip the symbols, and drop any token left empty.
+ */
+function searchTerms(title: string): string[] {
+  return title
+    .replace(/[™®©]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 function searchBody(title: string, hpKey: string, hpVal: string) {
   return {
     searchType: "games",
-    searchTerms: title.trim().split(/\s+/).filter(Boolean),
+    searchTerms: searchTerms(title),
     searchPage: 1,
     size: 20,
     searchOptions: {

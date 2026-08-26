@@ -180,6 +180,8 @@ type ScoredGameResult = {
   facts: {
     protonTier: string | null;
     hasAchievements: boolean;
+    /** estHoursRemaining is a lower bound, not an estimate. */
+    remainingIsFloor?: boolean;
     dataGaps: string[];
   };
 };
@@ -267,11 +269,30 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
       {/* The decision line: how much work is left, and anything that changes
           how painful that work is. Separated so the parts stay distinct. */}
       <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-        {typeof hoursLeft === "number" && (
+        {/*
+          When the hours figure is a floor it is actively misleading — "1.1h+"
+          still reads as "about an hour" for what may be a very long grind. So
+          lead with what is actually known: how many achievements are left.
+          The hours caveat is spelled out in dataGaps below.
+        */}
+        {facts.remainingIsFloor && typeof metrics.achievementsLeft === "number" ? (
           <span>
-            <span className="font-medium tabular-nums">~{hoursLeft}h</span>
-            <span className="text-muted-foreground"> left</span>
+            <span className="font-medium tabular-nums">
+              {metrics.achievementsLeft}
+            </span>
+            <span className="text-muted-foreground">
+              {metrics.achievementsLeft === 1
+                ? " achievement left"
+                : " achievements left"}
+            </span>
           </span>
+        ) : (
+          typeof hoursLeft === "number" && (
+            <span>
+              <span className="font-medium tabular-nums">~{hoursLeft}h</span>
+              <span className="text-muted-foreground"> left</span>
+            </span>
+          )
         )}
         {typeof rarity === "number" && (
           <>
@@ -400,6 +421,88 @@ function ToolCall({ part }: { part: DynamicToolPart }) {
 }
 
 /**
+ * A pending human-in-the-loop request — the built-in `ask_question` tool, or
+ * any tool gated on approval. eve parks the turn durably until it is answered,
+ * so without a control here the conversation simply stops forever, which is
+ * exactly what "Awaiting Approval" with no buttons looked like.
+ *
+ * The request rides on the tool part's metadata as
+ * `toolMetadata.eve.inputRequest`, and is answered with
+ * `agent.respond([{ requestId, optionId | text }])`.
+ */
+function InputRequestCard({
+  request,
+  onRespond,
+  answered,
+}: {
+  request: NonNullable<
+    NonNullable<DynamicToolPart["toolMetadata"]>["eve"]
+  >["inputRequest"];
+  onRespond: (response: { requestId: string; optionId?: string; text?: string }) => void;
+  answered: boolean;
+}) {
+  const [text, setText] = useState("");
+  if (!request) return null;
+
+  if (answered) {
+    return (
+      <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+        {request.prompt} <span className="text-foreground">— answered</span>
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
+      <p className="text-sm font-medium">{request.prompt}</p>
+
+      {request.options && request.options.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {request.options.map((option) => (
+            <Button
+              key={option.id}
+              size="sm"
+              variant={option.style === "primary" ? "default" : "outline"}
+              onClick={() =>
+                onRespond({ requestId: request.requestId, optionId: option.id })
+              }
+              title={option.description}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {/* Freeform is also the fallback when a question ships no options at
+          all, which would otherwise leave nothing to click. */}
+      {(request.allowFreeform || !request.options?.length) && (
+        <form
+          className="mt-2.5 flex items-end gap-2"
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            const answer = text.trim();
+            if (answer.length === 0) return;
+            setText("");
+            onRespond({ requestId: request.requestId, text: answer });
+          }}
+        >
+          <input
+            className="h-10 flex-1 rounded-md border bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            placeholder="Type your answer…"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+          />
+          <Button type="submit" className="h-10 px-4" disabled={text.trim().length === 0}>
+            Answer
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/**
  * score_backlog's result, rendered with no tool-call chrome at all — no
  * chevron, no "Completed" badge, no click needed. It sits at the same visual
  * level as the model's own text because it IS the answer, not a log of how
@@ -466,13 +569,67 @@ function ProfileGate({ onVerified }: { onVerified: (profile: VerifiedProfile) =>
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 text-center">
-      <div className="max-w-md space-y-2">
-        <h2 className="text-xl font-semibold tracking-tight">
-          Which Steam profile?
+      <div className="max-w-xl space-y-5">
+        <h2 className="text-3xl font-semibold tracking-tight text-balance">
+          How far through your Steam games are you?
         </h2>
+        <p className="text-lg text-muted-foreground text-balance">
+          Enter a public Steam profile and it pulls together four things Steam
+          keeps in separate places.
+        </p>
+
+        <ul className="mx-auto max-w-md space-y-3 text-left text-base">
+          <li className="flex gap-3">
+            <span aria-hidden className="text-primary">
+              →
+            </span>
+            <span>
+              <span className="font-medium">Achievement progress</span>{" "}
+              <span className="text-muted-foreground">
+                for every game you have played
+              </span>
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden className="text-primary">
+              →
+            </span>
+            <span>
+              <span className="font-medium">Hours to beat and to 100%</span>{" "}
+              <span className="text-muted-foreground">from HowLongToBeat</span>
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden className="text-primary">
+              →
+            </span>
+            <span>
+              <span className="font-medium">How rare your remaining achievements are</span>{" "}
+              <span className="text-muted-foreground">
+                — the difference between an hour left and a very long grind
+              </span>
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span aria-hidden className="text-primary">
+              →
+            </span>
+            <span>
+              <span className="font-medium">Linux support</span>{" "}
+              <span className="text-muted-foreground">from ProtonDB</span>
+            </span>
+          </li>
+        </ul>
+
+        <p className="text-base text-muted-foreground text-balance">
+          It reports those numbers and sorts games into fixed categories. It has
+          no idea which games you would actually enjoy, and it has no pricing
+          data — you decide what is worth your time.
+        </p>
+
         <p className="text-sm text-muted-foreground">
-          Your Steam username, your profile link, or your 17-digit Steam ID number. The profile and
-          its game details need to be public.
+          A Steam username, profile link, or 17-digit Steam ID. The profile and
+          its game details must be public.
         </p>
       </div>
 
@@ -540,6 +697,15 @@ export default function Home() {
     // whatever is still running before accepting the new message, so it is
     // safe to use even when the client believes nothing is active.
     void agent.send(payload, { turnPolicy: "steer" });
+  };
+
+  /** Answers a parked question or approval so the turn can resume. */
+  const respondToInput = (response: {
+    requestId: string;
+    optionId?: string;
+    text?: string;
+  }) => {
+    void agent.respond([response]);
   };
 
   const changeProfile = () => {
@@ -654,6 +820,20 @@ export default function Home() {
                         }
 
                         if (part.type === "dynamic-tool") {
+                          // A pending question or approval must be answerable,
+                          // or the turn parks forever.
+                          const inputRequest = part.toolMetadata?.eve?.inputRequest;
+                          if (inputRequest) {
+                            return (
+                              <InputRequestCard
+                                key={part.toolCallId}
+                                request={inputRequest}
+                                answered={Boolean(part.toolMetadata?.eve?.inputResponse)}
+                                onRespond={respondToInput}
+                              />
+                            );
+                          }
+
                           return part.toolName === "score_backlog" ? (
                             <ScoreBacklogAnswer key={part.toolCallId} part={part} />
                           ) : (

@@ -65,13 +65,27 @@ export default defineTool({
         mode: output.mode,
         // No fallbackReason here: it restates the card, and the model is now
         // told not to. It stays on the full output for the UI contract.
-        games: output.scored.map((game) => ({
-          name: game.name,
-          verdict: game.categoryLabel,
-          ...game.metrics,
-          proton: game.facts.protonTier,
-          caveats: game.facts.dataGaps.length > 0 ? game.facts.dataGaps : undefined,
-        })),
+        games: output.scored.map((game) => {
+          // Withhold the hours figure entirely when it is known not to hold.
+          // Telling the model "this is a minimum" was not enough — it still
+          // rendered as "just over an hour", which is the wrong impression.
+          // If it cannot see the number, it cannot quote it.
+          const { estHoursRemaining, ...metrics } = game.metrics;
+          const shown = game.facts.remainingIsFloor
+            ? metrics
+            : { ...metrics, estHoursRemaining };
+
+          return {
+            name: game.name,
+            verdict: game.categoryLabel,
+            ...shown,
+            proton: game.facts.protonTier,
+            hoursRemainingIsMinimumNotEstimate:
+              game.facts.remainingIsFloor || undefined,
+            caveats:
+              game.facts.dataGaps.length > 0 ? game.facts.dataGaps : undefined,
+          };
+        }),
         rules: output.reasonRules,
       },
     };
