@@ -15,12 +15,17 @@ Read `node_modules/eve/docs/` before writing agent code — eve is preview-stage
 **Two processes, in this order.** This is not the default `withEve()` setup — see "The retry loop" below for why.
 
 ```bash
-# terminal 1 — eve on a FIXED port
-WORKFLOW_LOCAL_BASE_URL=http://127.0.0.1:4278 npx eve dev --no-ui --port 4278
+# terminal 1 — eve on a FIXED port, with the transport timeouts raised
+WORKFLOW_LOCAL_BASE_URL=http://127.0.0.1:4278 WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS=600000 WORKFLOW_LOCAL_BODY_TIMEOUT_MS=600000   npx eve dev --no-ui --port 4278
 
 # terminal 2
 npm run dev
+
+# terminal 3, once — pays the cold-start cost so your first question doesn't
+npx tsx scripts/warm-eve.ts http://127.0.0.1:4278
 ```
+
+**The two timeout vars are not optional if you care about latency** — see "Why the first turn is slow" below.
 
 `.env.local` must contain `EVE_BASE_URL=http://127.0.0.1:4278` for Next to proxy to that process instead of spawning its own. **Never set `EVE_BASE_URL` in production** — it points at localhost.
 
@@ -52,9 +57,38 @@ It carries a regression case per bug fixed, and the false-positive cases for the
 npx tsx scripts/smoke.ts [vanityOrSteamID64]   # keyless APIs + scoring logic, no keys needed
 npx tsx scripts/smoke-keys.ts                  # validates both API keys, ~86 tokens
 npx tsx scripts/time-sweep.ts [profile]        # times each data source end to end
+npx tsx scripts/warm-eve.ts [baseUrl]          # pays eve's cold-start cost up front
 ```
 
 They default to a public test profile; override with `SMOKE_STEAM_PROFILE` / `SMOKE_STEAM_ID`.
+
+## Why the first turn is slow
+
+Measured on a 597-game library, all four numbers from the same session:
+
+| | |
+| --- | --- |
+| First turn in a fresh eve process | **59.1s** |
+| Second turn, same process | **6.9s** |
+| Gemini call, full instructions + all tool declarations | 0.9s |
+| `sweep_achievements` across 137 games | 3.8s |
+
+**It is not the model and not the data.** Both were timed independently and are fast. The ~50s is eve compiling the agent and its tools lazily on first use, and it is paid once per process. A per-step breakdown of a cold turn shows it precisely: the first step takes 22-52s, and every step after it takes 0.6-1.7s.
+
+That cold start then cascades, which is what made it look like a networking bug:
+
+1. `@workflow/world-local` POSTs each step to eve and gives up if response headers take longer than `WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS` — **default 30 000**.
+2. A cold first step needs more than that, so the delivery is aborted and reported as `TypeError: fetch failed`.
+3. world-local then sleeps a **hardcoded 5s** and redelivers, up to 256 times. The redelivery finds the step still running ("already in flight, awaiting its settlement") and waits, only to be cut off at 30s again.
+
+So a slow-but-healthy step gets killed and retried repeatedly. Raising the two timeout vars in "Running it" stops that: retries went from 9 in a turn to **0**, and turn time from 98.8s to 60.2s. `scripts/warm-eve.ts` removes the rest by paying the compile cost before a person is waiting on it.
+
+Two smaller contributors, both measured:
+
+- **Stale run recovery.** world-local replays active runs on startup. With 21 run directories in `.eve` this added ~35s to the first turn; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` removes it, at the cost of not resuming interrupted runs after a restart.
+- **Reasoning effort is not the cause.** `reasoning: "none"` was tried and made no measurable difference (59.1s vs 60.2s), so `low` was kept.
+
+If turns feel slow again, check in this order: is the eve process fresh (cold start), are the timeout vars set, and only then look at the model.
 
 ## Architecture
 
@@ -127,7 +161,7 @@ Category badge colours need a per-theme pair (`text-x-700 dark:text-x-400`). `bg
 
 ## Known issues / unfinished
 
-- **eve's dev retry loop is mitigated, not fixed.** `withEve()` spawns eve on `--port 0` and never tells the child its own address, so `@workflow/world-local` re-discovers its port via `netstat` plus a 500ms probe race on *every* queue delivery. Under Turbopack compile load the probe misses and turns hang with `TypeError: fetch failed`. The fixed-port setup above avoids it (2 retries per turn vs dozens). No official fix exists in eve 0.44.4 — verified against its docs and changelog.
+- **eve's dev retry loop is understood and mostly defused** — see "Why the first turn is slow". The remaining unfixable part is a keep-alive mismatch: `@workflow/world-local` pools sockets for 30s (`keepAliveTimeout: 30000`, hardcoded) while eve's dev server is a stock Node server that closes idle sockets at 5s. Reproduced directly — a reused socket succeeds after 2s and 4s idle and gets `ECONNRESET` after 6s. Neither side is configurable. In practice it costs a 5s backoff occasionally rather than the storm it used to, because the raised transport timeouts stop the far more common cause. No official fix exists in eve 0.44.4.
 - **Not deployed.** Vercel should be a **new project** (not "new agent"); `withEve()` deploys the Next app and eve runtime as one project. `npx next build` passes locally.
 - **Auth is `none()`** in `agent/channels/eve.ts` — anyone with the URL can spend the Gemini quota, and the free tier's daily cap is low. Add auth before sharing the URL.
 - **Model still occasionally re-calls tools** it already has results for, despite instructions and tool descriptions saying not to. This is why grounding is enforced in code rather than by prompting — the same unreliability applies to "only quote numbers you were given".

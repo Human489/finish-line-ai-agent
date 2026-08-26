@@ -233,7 +233,7 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
   const [failed, setFailed] = useState(false);
 
   return (
-    <div className="relative aspect-2/3 w-full overflow-hidden rounded-md bg-muted">
+    <div className="relative aspect-4/5 w-full overflow-hidden rounded-md bg-muted">
       {failed ? (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           {name}
@@ -287,19 +287,26 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 
   return (
-    <div className="flex h-full flex-col rounded-lg border p-3">
+    <div className="flex h-full flex-col rounded-lg border p-2">
       <GameArtwork appid={game.appid} name={game.name} />
 
-      {/* items-start, not items-baseline: with the name now able to wrap to
-          two lines (long titles like "Middle-earth™: Shadow of Mordor"),
-          baseline alignment would pull the badge down to the last line. */}
-      <div className="mt-2.5 flex items-start justify-between gap-3">
-        <span className="font-medium break-words">{game.name}</span>
-        <Badge className={`shrink-0 ${badgeClassName}`}>{game.categoryLabel}</Badge>
+      {/*
+        Name and badge stack instead of sharing a line. Side by side they were
+        fighting for room: at 3-up the card is ~230px wide, and a long title
+        ("Middle-earth™: Shadow of Mordor") plus "Rarity Wall Ahead" left both
+        wrapping to two lines each. Stacked, the title gets the full width and
+        is clamped to two lines, and the badge sits on its own row at full
+        size rather than being squeezed.
+      */}
+      <div className="mt-2 min-w-0">
+        <span className="line-clamp-2 text-sm leading-snug font-medium break-words" title={game.name}>
+          {game.name}
+        </span>
+        <Badge className={`mt-1.5 ${badgeClassName}`}>{game.categoryLabel}</Badge>
       </div>
 
       {hasProgress && (
-        <div className="mt-2.5 flex items-center gap-2.5">
+        <div className="mt-2 flex items-center gap-2">
           <div
             className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"
             role="progressbar"
@@ -315,13 +322,13 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
               style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
             />
           </div>
-          <span className="shrink-0 text-sm tabular-nums">{progress}%</span>
+          <span className="shrink-0 text-xs tabular-nums">{progress}%</span>
         </div>
       )}
 
       {/* The decision line: how much work is left, and anything that changes
           how painful that work is. Separated so the parts stay distinct. */}
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-xs">
         {/*
           When the hours figure is a floor it is actively misleading — "1.1h+"
           still reads as "about an hour" for what may be a very long grind. So
@@ -370,7 +377,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
               ·
             </span>
             <span className="text-muted-foreground tabular-nums">
-              {rarity}% unlock rate on the rest
+              {rarity}% unlock rate
             </span>
           </>
         )}
@@ -387,7 +394,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
       </div>
 
       {(secondary.length > 0 || !facts.hasAchievements) && (
-        <p className="mt-1.5 text-xs text-muted-foreground">
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
           {[
             ...secondary,
             // achievementsUnknown means Steam never confirmed either way —
@@ -400,7 +407,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
       )}
 
       {facts.dataGaps.length > 0 && (
-        <ul className="mt-auto space-y-0.5 border-t pt-2 text-xs text-muted-foreground">
+        <ul className="mt-auto space-y-0.5 border-t pt-1.5 text-[11px] leading-snug text-muted-foreground">
           {facts.dataGaps.map((gap) => (
             <li key={gap}>{gap}</li>
           ))}
@@ -418,18 +425,18 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
   return (
     <div className="space-y-2 p-3">
       {/*
-        1 column under ~448px (default), 2 from sm (384px+ of actual card
-        width once the p-4 message padding is subtracted), capped at 2 even
-        at the widest point this ever renders: the page shell is max-w-3xl
-        (768px) minus the message bubble's own padding, and a portrait card
-        needs real width for its 2:3 artwork plus a category badge on the
-        name line — 3-up at that container width measured under ~200px per
-        card, which crushed both the artwork and "Middle-earth™: Shadow of
-        Mordor" onto illegibly narrow columns. Grid, not flex-wrap: equal
-        row heights across a row of mismatched content (0 vs 3 dataGaps
-        lines) is what grid's row-track sizing gives for free.
+        2 up on phones, 3 from lg. The page shell is max-w-3xl (768px), so at
+        3-up each card is roughly 230px — workable only because the card was
+        made compact for it: the category badge moved off the title line onto
+        its own row, the title is clamped to two lines, the artwork was
+        shortened from 2:3 to 4:5, and the supporting figures dropped to 11px.
+        Left at 2 columns on phones because 3 at 375px would be ~110px per
+        card, which no amount of tightening rescues.
+
+        Grid, not flex-wrap: a row mixes cards with 0 and 3 caveat lines, and
+        grid's row-track sizing equalises their heights for free.
       */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
         ))}
@@ -896,8 +903,13 @@ export default function Home() {
     setProfile(null);
   };
 
+  // max-w-5xl, not the original 3xl: at 3-up a 768px shell left each card
+  // around 230px and half a 1280px screen empty. 1024px gives roughly 320px
+  // per card, which is what the artwork and a wrapped title actually need.
+  // Prose still reads fine because the answer text is one or two sentences,
+  // never a wall.
   return (
-    <div className="mx-auto flex h-dvh max-w-3xl flex-col px-4">
+    <div className="mx-auto flex h-dvh max-w-5xl flex-col px-4">
       {/* items-center, not items-baseline: the right-hand controls are
           buttons, which have no meaningful shared baseline with a two-line
           text block and ended up sitting high. */}
