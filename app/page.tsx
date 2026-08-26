@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/popover";
 
 /**
- * The seven categories score_backlog can assign. Labels and descriptions
+ * The six categories score_backlog can assign. Labels and descriptions
  * come from agent/lib/categories.ts — the single source of truth, imported
  * above — so they can no longer drift from scoring.ts the way they did
  * before (Quick Win's stated definition not matching what scoreGame actually
@@ -48,7 +48,6 @@ const CATEGORY_ORDER: Category[] = [
   "keep-going",
   "never-started",
   "long-haul",
-  "proton-blocked",
 ];
 
 const CATEGORY_CLASSNAMES: Record<Category, string> = {
@@ -63,10 +62,6 @@ const CATEGORY_CLASSNAMES: Record<Category, string> = {
   "never-started": "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
   // orange-800 for the same reason as amber above (-700 measured 4.43:1).
   "long-haul": "bg-orange-500/15 text-orange-800 dark:text-orange-400",
-  // Not text-destructive: that token is #ff7b72 in both themes, which is
-  // too pale to read on a light background. Same per-theme pattern as the
-  // other badges instead.
-  "proton-blocked": "bg-rose-500/15 text-rose-700 dark:text-rose-400",
 };
 
 const CATEGORIES: { label: string; description: string; className: string }[] =

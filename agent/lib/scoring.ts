@@ -339,9 +339,7 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
   // --- Category assignment: first match wins, fully deterministic. ---
   let category: Category;
 
-  if (proton?.tier?.toLowerCase() === "borked") {
-    category = "proton-blocked";
-  } else if (input.hoursPlayed === 0) {
+  if (input.hoursPlayed === 0) {
     category = "never-started";
   } else if (
     progressPercent !== null &&
@@ -406,7 +404,6 @@ const CATEGORY_RANK: Record<Category, number> = {
   "rarity-wall-ahead": 3,
   "long-haul": 4,
   "never-started": 5,
-  "proton-blocked": 6,
 };
 
 /** Best candidates first: category, then least work remaining. */

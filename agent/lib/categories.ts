@@ -1,5 +1,5 @@
 /**
- * Single source of truth for the seven backlog categories: their labels,
+ * Single source of truth for the six backlog categories: their labels,
  * their user-facing descriptions, and the numeric thresholds that decide
  * them. Previously these were duplicated across scoring.ts, app/page.tsx and
  * agent/instructions.md, and the drift between copies already caused a live
@@ -10,7 +10,6 @@
  */
 
 export type Category =
-  | "proton-blocked"
   | "finish-line"
   | "quick-win"
   | "rarity-wall-ahead"
@@ -19,7 +18,6 @@ export type Category =
   | "long-haul";
 
 export const CATEGORY_LABELS: Record<Category, string> = {
-  "proton-blocked": "Proton-Blocked",
   "finish-line": "Finish Line",
   "quick-win": "Quick Win",
   "rarity-wall-ahead": "Rarity Wall Ahead",
@@ -37,8 +35,6 @@ export const CATEGORY_DESCRIPTIONS: Record<Category, string> = {
   "keep-going": "Started, real progress, more to do.",
   "never-started": "Owned, never launched.",
   "long-haul": "More than thirty hours remaining.",
-  "proton-blocked":
-    'Reported as not working on Linux / Steam Deck (ProtonDB rates it "Borked").',
 };
 
 export const THRESHOLDS = {

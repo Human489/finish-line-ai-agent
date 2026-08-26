@@ -33,7 +33,7 @@ const CONCURRENCY = 5;
 
 export default defineTool({
   description:
-    "Score a shortlist of games and assign each a final category (Finish Line, Quick Win, Rarity Wall Ahead, Keep Going, Never Started, Long Haul, Proton-Blocked). This performs all the arithmetic. The category it returns is the verdict — never recompute or override it. Call this last.",
+    "Score a shortlist of games and assign each a final category (Finish Line, Quick Win, Rarity Wall Ahead, Keep Going, Never Started, Long Haul). This performs all the arithmetic. The category it returns is the verdict — never recompute or override it. Linux compatibility is returned alongside as context and is never a category. Call this last.",
   inputSchema: z.object({
     steamId: z.string().regex(/^\d{17}$/).describe("A 17-digit SteamID64."),
     appids: z

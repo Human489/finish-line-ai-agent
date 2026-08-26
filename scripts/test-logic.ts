@@ -193,7 +193,23 @@ async function main() {
     );
   });
 
-  await test("borked on Linux wins outright", () => {
+  // Categories describe how much work is left and nothing else. Linux support
+  // used to short-circuit the whole chain as its own "Proton-Blocked" verdict,
+  // which meant one game could be both nearly finished AND unplayable while
+  // only the second fact survived. It is reported as context instead.
+  await test("Linux support does not change the category", () => {
+    const borked = { tier: "borked", score: null, confidence: null, reports: 3 };
+    const input = { ...base, achievements: achievements(), playtime: playtime(), rarity: COMMON };
+
+    const withBorked = scoreGame({ ...input, proton: borked }, "completionist");
+    const without = scoreGame(input, "completionist");
+
+    assert.equal(withBorked.category, without.category);
+    // ...but the tier must still reach the UI, or the warning is simply lost.
+    assert.equal(withBorked.facts.protonTier, "borked");
+  });
+
+  await test("a borked game that is never started is still Never Started", () => {
     assert.equal(
       categoryOf(
         {
@@ -204,7 +220,7 @@ async function main() {
         },
         "completionist",
       ),
-      "proton-blocked",
+      "never-started",
     );
   });
 

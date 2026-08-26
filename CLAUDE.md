@@ -62,7 +62,7 @@ They default to a public test profile; override with `SMOKE_STEAM_PROFILE` / `SM
 
 The core design constraint, spanning `agent/lib/scoring.ts`, `agent/tools/score_backlog.ts` and `agent/instructions.md`:
 
-**The model performs no arithmetic and chooses no verdict.** `scoring.ts` computes every number and assigns one of seven fixed categories. The model receives that verdict as a fixed field and may only write a short sentence around it. `templateReason()` exists so the app still works correctly with zero useful LLM output — and `FallbackAnswer` in `app/page.tsx` actually renders it when the model says nothing, which for a long time it did not.
+**The model performs no arithmetic and chooses no verdict.** `scoring.ts` computes every number and assigns one of six fixed categories. The model receives that verdict as a fixed field and may only write a short sentence around it. `templateReason()` exists so the app still works correctly with zero useful LLM output — and `FallbackAnswer` in `app/page.tsx` actually renders it when the model says nothing, which for a long time it did not.
 
 The contract is **enforced at render, not requested**. `GroundedText` in `app/page.tsx` runs `findUngroundedNumbers()` over the model's prose against the metrics of every game in that turn's `score_backlog` output, and swaps the whole sentence for `templateReason()` if anything fails. It has to live there: eve's hooks are observe-only, fire after the text is durably persisted and streaming, and can only throw (failing the entire turn) rather than substitute — so the render path is the first place holding both the prose and the full untrimmed tool output. The cost is that this guards **this UI only**; ungrounded text still sits in the durable transcript for any other consumer.
 
@@ -74,7 +74,7 @@ When adding a metric, add it to `scoring.ts` — never let the model derive one.
 
 ### One source of truth for categories
 
-`agent/lib/categories.ts` holds the seven categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.
+`agent/lib/categories.ts` holds the six categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.
 
 ### Two output shapes per tool
 

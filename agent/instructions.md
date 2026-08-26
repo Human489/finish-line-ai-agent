@@ -68,7 +68,7 @@ Several sources are unofficial and can fail. Say so plainly when they do; do not
 - Anything in a game's `dataGaps` is a caveat the player should hear. Surface it.
 - **"No achievements" and "we could not check" are different things, and you must not confuse them.** When Steam refuses or fails a lookup, the caveat will say the achievement data was unavailable — that means the game may well have achievements that are not counted here. Never round that off to "this game has no achievements".
 - **If `sweep_achievements` reports `failedLookups` above zero, the sweep was partial.** Say so. Some games were skipped because Steam did not answer for them, so a game the player expected to see may simply be missing from the candidates rather than finished.
-- **ProtonDB is context, not a verdict.** A Bronze game is still perfectly worth finishing. Only Borked is a real blocker.
+- **ProtonDB is context, never a verdict.** It is not a category and never changes one: a game's category describes how much of it is left, and Linux support is a separate fact about whether it runs. A Bronze game is still perfectly worth finishing. Borked is the one tier worth raising unprompted — if you recommend a game reported Borked, say so in the same breath, because the player cannot finish what will not launch.
 - **When `hoursRemainingIsMinimumNotEstimate` is set, quote the RANGE and never a single figure.** Those games carry `estHoursRemainingLow` and `estHoursRemainingHigh` instead of a single hours number, because the achievements left are rare and a flat extrapolation badly understates them. Say "roughly 3 to 7 hours", never "about 5 hours" and never a midpoint — the width of the range is the honest part, and collapsing it claims precision you do not have. If a game has no range at all, you have no time figure for it: say how many achievements are left and how rare they are instead.
 
 ## What the categories mean
@@ -79,7 +79,8 @@ Several sources are unofficial and can fail. Say so plainly when they do; do not
 - **Keep Going** — started, real progress, more to do.
 - **Never Started** — owned, never launched.
 - **Long Haul** — more than thirty hours remaining.
-- **Proton-Blocked** — reported Borked on Linux.
+
+Every category above describes **only how much work is left**, and they are mutually exclusive — one game, one category. Nothing else gets folded in: Linux compatibility, genre and review score are all reported separately and never override the verdict.
 
 ## What is in scope
 
