@@ -36,7 +36,17 @@ npx eve info                              # agent surface + diagnostics; run aft
 
 `eve info` reporting `0 errors` is meaningful proof for `disableTool()` files — eve fails discovery on an unrecognised tool name rather than silently ignoring it.
 
-### Scripts (no test framework; these hit live APIs)
+### Tests
+
+```bash
+npx tsx scripts/test-logic.ts            # assertions over the deterministic logic; no keys, no network
+```
+
+The only script here that asserts rather than prints. It covers `scoring.ts` (category assignment, mode gating, the hours floor), `findUngroundedNumbers` and `pooledSettled`, and exits non-zero on failure — run it after touching any of them. There is no test framework; it is `node:assert` under `tsx`, deliberately, to avoid adding a dependency for one file.
+
+It carries a regression case per bug fixed, and the false-positive cases for the grounding checker matter as much as the true positives: a false positive discards a *correct* sentence. One case asserts `templateReason()` never trips the checker, since it is the text that replaces rejected prose.
+
+### Live scripts (no assertions; these hit real APIs)
 
 ```bash
 npx tsx scripts/smoke.ts [vanityOrSteamID64]   # keyless APIs + scoring logic, no keys needed
@@ -52,9 +62,17 @@ They default to a public test profile; override with `SMOKE_STEAM_PROFILE` / `SM
 
 The core design constraint, spanning `agent/lib/scoring.ts`, `agent/tools/score_backlog.ts` and `agent/instructions.md`:
 
-**The model performs no arithmetic and chooses no verdict.** `scoring.ts` computes every number and assigns one of seven fixed categories. The model receives that verdict as a fixed field and may only write a short sentence around it. `templateReason()` exists so the app still works correctly with zero useful LLM output.
+**The model performs no arithmetic and chooses no verdict.** `scoring.ts` computes every number and assigns one of seven fixed categories. The model receives that verdict as a fixed field and may only write a short sentence around it. `templateReason()` exists so the app still works correctly with zero useful LLM output — and `FallbackAnswer` in `app/page.tsx` actually renders it when the model says nothing, which for a long time it did not.
 
-When adding a metric, add it to `scoring.ts` — never let the model derive one.
+The contract is **enforced at render, not requested**. `GroundedText` in `app/page.tsx` runs `findUngroundedNumbers()` over the model's prose against the metrics of every game in that turn's `score_backlog` output, and swaps the whole sentence for `templateReason()` if anything fails. It has to live there: eve's hooks are observe-only, fire after the text is durably persisted and streaming, and can only throw (failing the entire turn) rather than substitute — so the render path is the first place holding both the prose and the full untrimmed tool output. The cost is that this guards **this UI only**; ungrounded text still sits in the durable transcript for any other consumer.
+
+`findUngroundedNumbers` checks numbers **with their units** (`92%`, `5h`, `3 achievements`) and ignores bare digits on purpose — in this domain most bare digits are game titles ("Portal 2"), not claims. Checking the unit also catches a swap the value alone cannot: `achievementPercent` of 95 quoted as "95 hours left" is grounded on digits and nonsense in fact. Only the exact value and its rounding are accepted; floor/ceil were tried and dropped, because `ceil(1.1) = 2` let "about 2h" through for a 1.1h figure.
+
+When adding a metric, add it to `scoring.ts` — never let the model derive one. Give its key a name containing `percent`, `rarity`, `hours` or `achievements`, or `unitFor()` will not know what unit it may be quoted in and will skip validating it.
+
+### One source of truth for categories
+
+`agent/lib/categories.ts` holds the seven categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.
 
 ### Two output shapes per tool
 
@@ -87,7 +105,13 @@ Steam ships `™®©` in game names and HLTB does not — search terms are strip
 
 ### No database
 
-`agent/lib/cache.ts` is a `Map` scoped by session id, held in the server process. It dies on restart. `.eve/` is gitignored — it contains real conversation transcripts.
+`agent/lib/cache.ts` is a `Map` scoped by session id, held in the server process. It dies on restart. It is **bounded** — 50 sessions, 60-minute TTL, evicted lazily on access with no background timer — because it previously grew for the lifetime of the process, each entry holding a full library plus per-appid maps. `.eve/` is gitignored — it contains real conversation transcripts.
+
+`pooled()` aborts every sibling if one worker rejects, which is the wrong failure mode for the achievement sweep — one bad response would discard hundreds of good lookups. `sweep_achievements` therefore uses `pooledSettled()` and reports a `failedLookups` count so a partial sweep is visible to the model and the player, rather than silently reading as "these games have no achievements".
+
+### Failure states must stay distinguishable
+
+`AchievementProgress.unknown` exists because collapsing every failure into `hasAchievements: false` made the app state a confident falsehood — a transient 500 produced the caveat "This game has no Steam achievements". A non-ok status, fetch error or parse failure now sets `unknown: true`, which `scoring.ts` turns into an honest "Steam did not return achievement data" caveat and `page.tsx` renders as "achievement data unavailable". Steam's 400 is genuinely ambiguous between "no achievements" and "private stats", so it counts as unknown.
 
 ### Theming
 
@@ -100,7 +124,8 @@ Category badge colours need a per-theme pair (`text-x-700 dark:text-x-400`). `bg
 - **eve's dev retry loop is mitigated, not fixed.** `withEve()` spawns eve on `--port 0` and never tells the child its own address, so `@workflow/world-local` re-discovers its port via `netstat` plus a 500ms probe race on *every* queue delivery. Under Turbopack compile load the probe misses and turns hang with `TypeError: fetch failed`. The fixed-port setup above avoids it (2 retries per turn vs dozens). No official fix exists in eve 0.44.4 — verified against its docs and changelog.
 - **Not deployed.** Vercel should be a **new project** (not "new agent"); `withEve()` deploys the Next app and eve runtime as one project. `npx next build` passes locally.
 - **Auth is `none()`** in `agent/channels/eve.ts` — anyone with the URL can spend the Gemini quota, and the free tier's daily cap is low. Add auth before sharing the URL.
-- **Model still occasionally re-calls tools** it already has results for, despite instructions and tool descriptions saying not to.
+- **Model still occasionally re-calls tools** it already has results for, despite instructions and tool descriptions saying not to. This is why grounding is enforced in code rather than by prompting — the same unreliability applies to "only quote numbers you were given".
+- **`ask_question` and the verify route are the remaining unauthenticated surfaces.** `app/api/steam/verify` now rate-limits to 10 requests/minute/IP, but that counter is per-process and therefore close to useless on serverless, where each instance keeps its own. It is a speed bump, not a control; real protection needs auth or a shared store.
 - **HowLongToBeat may behave differently on Vercel** — its token is bound to caller IP, and serverless IPs are shared and rotate. Degrades to "no hours" rather than erroring.
 - **The eve workshop upgrade is unpicked.** `approval: always()` was tried on `sweep_achievements` and reverted — these tools are read-only, so approval is friction without safety benefit. Remaining candidates are Skills (poor fit — logic is deterministic code, not procedural knowledge) or `defineState` (would replace the hand-rolled cache with durable framework state).
 - **Steam Family Sharing is not feasible** as currently designed. `IFamilyGroupsService` endpoints exist but reject the Web API key (401) — they need a user access token, which would require Steam login and break the "any public profile, no login" design.
