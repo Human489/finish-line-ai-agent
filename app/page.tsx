@@ -909,12 +909,19 @@ export default function Home() {
   // Prose still reads fine because the answer text is one or two sentences,
   // never a wall.
   return (
-    <div className="mx-auto flex h-dvh max-w-5xl flex-col px-4">
+    <div className="mx-auto flex h-dvh w-full max-w-5xl flex-col px-4">
       {/* items-center, not items-baseline: the right-hand controls are
           buttons, which have no meaningful shared baseline with a two-line
           text block and ended up sitting high. */}
-      <header className="flex items-center justify-between gap-4 border-b py-4">
-        <div>
+      {/*
+        flex-wrap and min-w-0: on a 375px phone the strapline, both buttons and
+        the profile line together need ~423px, so the row used to push the page
+        into horizontal scroll — measured at scrollWidth 456 vs clientWidth 375.
+        Wrapping lets the controls drop to their own line instead of widening
+        the document.
+      */}
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b py-4">
+        <div className="min-w-0">
           {/* Accented like the portfolio's section headings. */}
           <h1 className="text-lg font-semibold tracking-tight text-primary">
             Finish Line
@@ -923,14 +930,14 @@ export default function Home() {
             Which of your Steam games are you closest to finishing?
           </p>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-1 gap-y-1">
           <ThemeToggle />
           <CategoryLegend />
           {profile && (
             /* text-sm to match the buttons beside it, with separators so the
                three values stay distinct. */
-            <div className="ml-1 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">
+            <div className="ml-1 flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              <span className="max-w-[16ch] truncate font-medium text-foreground" title={profile.personaName}>
                 {profile.personaName}
               </span>
               <span aria-hidden className="text-muted-foreground/40">
@@ -958,8 +965,11 @@ export default function Home() {
         <ProfileGate onVerified={setProfile} />
       ) : (
         <>
-          <Conversation className="flex-1">
-            <ConversationContent className="gap-4">
+          {/* min-w-0: a flex child defaults to min-width:auto, so the
+              transcript's min-content width was widening the whole page
+              instead of wrapping (measured 390px on a 375px viewport). */}
+          <Conversation className="min-w-0 flex-1">
+            <ConversationContent className="min-w-0 gap-4">
               {isFirstMessage && (
                 <ConversationEmptyState>
                   <div className="max-w-md space-y-1">
@@ -1092,7 +1102,7 @@ export default function Home() {
           </Conversation>
 
           <form
-            className="flex items-end gap-2 border-t py-4"
+            className="flex min-w-0 items-end gap-2 border-t py-4"
             onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
               submit(input);

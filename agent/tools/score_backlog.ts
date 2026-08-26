@@ -28,7 +28,11 @@ import {
  * The category returned here is final. The model is not permitted to choose,
  * change or soften it — see instructions.md.
  */
-const MAX_GAMES = 20;
+// 10, not 20. Twenty cards is more than anyone reads, and the answer is one
+// recommendation — the extra fifteen are scrolling, not information. It also
+// halves the per-turn enrichment: score_backlog is the only tool that hits
+// HowLongToBeat, one request per game.
+const MAX_GAMES = 10;
 const CONCURRENCY = 5;
 
 export default defineTool({
