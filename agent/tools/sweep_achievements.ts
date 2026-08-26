@@ -112,10 +112,10 @@ export default defineTool({
       return { game, progress };
     });
 
-    const failedLookups = settled.filter((entry) => entry.status === "rejected").length;
+    const rejected = settled.filter((entry) => entry.status === "rejected").length;
     // `completed` only counts workers that actually returned, so a rejection
     // does not inflate the progress counter shown to the user.
-    completed -= failedLookups;
+    completed -= rejected;
 
     const results = settled
       .filter(
@@ -133,6 +133,18 @@ export default defineTool({
       recent: [...recent],
       summary: null,
     };
+
+    /*
+     * A lookup Steam refused is NOT a game without achievements, and the two
+     * must not be added together. getAchievementProgress deliberately does not
+     * throw — it returns `unknown: true` — so counting only rejected promises
+     * missed every one of these, folded them into "games without achievements",
+     * and left failedLookups at 0 so the partial-sweep warning never fired.
+     * That is precisely the confident-false-claim this codebase exists to
+     * avoid, and instructions.md tells the model these are different things.
+     */
+    const unknownLookups = results.filter((entry) => entry.progress.unknown).length;
+    const uncheckable = rejected + unknownLookups;
 
     const withAchievements = results.filter((entry) => entry.progress.hasAchievements);
     const perfected = withAchievements.filter((entry) => entry.progress.percent === 100);
@@ -159,14 +171,16 @@ export default defineTool({
         playedGames: played.length,
         neverStartedGames: neverStarted,
         gamesWithAchievements: withAchievements.length,
-        gamesWithoutAchievements: played.length - withAchievements.length - failedLookups,
+        // Confirmed absences only — anything Steam would not answer for is
+        // counted under failedLookups instead.
+        gamesWithoutAchievements: played.length - withAchievements.length - uncheckable,
         alreadyPerfected: perfected.length,
-        failedLookups,
+        failedLookups: uncheckable,
         candidates,
         note:
           "Candidates are unfinished games ranked by achievement completion. Pass the interesting appids to score_backlog for hours-remaining and a verdict." +
-          (failedLookups > 0
-            ? ` ${failedLookups} game(s) could not be looked up and were skipped; the sweep is partial.`
+          (uncheckable > 0
+            ? ` ${uncheckable} game(s) could not be checked — Steam did not return achievement data for them, so they are missing from these candidates rather than finished. The sweep is partial; say so.`
             : ""),
       },
     };

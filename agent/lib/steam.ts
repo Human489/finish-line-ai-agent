@@ -8,6 +8,16 @@
  * Every keyed call goes through `keyedFetch`, which retries on 429 with backoff.
  */
 
+/**
+ * Bounds every outbound call. `fetch` rejects on a transport error but waits
+ * forever on a server that accepts and then goes quiet, which would hang a
+ * tool step with no way out — the queue delivery around it gets retried, the
+ * in-flight step does not. Steam is reliable enough that this is a backstop
+ * rather than a routine path, but resolveSteamId is the first call of every
+ * conversation and is also reachable unauthenticated via /api/steam/verify.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 const WEB_API = "https://api.steampowered.com";
 const COMMUNITY = "https://steamcommunity.com";
 
@@ -28,7 +38,10 @@ function apiKey(): string {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function keyedFetch(url: string, attempt = 0): Promise<Response> {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
 
   if (response.status === 429 && attempt < 4) {
     await sleep(500 * 2 ** attempt);
@@ -61,7 +74,10 @@ export async function resolveSteamId(
     ? `${COMMUNITY}/profiles/${candidate}/?xml=1`
     : `${COMMUNITY}/id/${encodeURIComponent(candidate)}/?xml=1`;
 
-  const response = await fetch(target, { cache: "no-store" });
+  const response = await fetch(target, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Steam profile lookup failed (HTTP ${response.status}).`);
   }
@@ -165,22 +181,30 @@ export async function getAchievementProgress(
     return unknown;
   }
 
-  // 400 here is ambiguous between "this game has no achievements" and "stats
-  // are private" - either way Steam refused to answer, so this is unknown,
-  // not a confirmed absence.
-  if (!response.ok) return unknown;
-
   let body: {
     playerstats?: {
       success?: boolean;
+      error?: string;
       achievements?: { apiname: string; achieved: number }[];
     };
   };
+  // Parsed even on a non-2xx, because Steam says which kind of failure it is.
+  // A game with no achievements answers 400 with
+  //   {"playerstats":{"error":"Requested app has no stats","success":false}}
+  // which is a definite answer, not a refusal — verified against Half-Life
+  // (appid 70). Treating every 400 as "unknown" made the common case (an old
+  // game that simply has no achievements) look like a failed lookup, which
+  // then showed up as a spurious "the sweep is partial" warning.
   try {
     body = await response.json();
   } catch {
     return unknown;
   }
+
+  const noStats = /has no stats/i.test(body.playerstats?.error ?? "");
+  if (noStats) return empty;
+  // Any other non-2xx really is a refusal we cannot interpret.
+  if (!response.ok) return unknown;
 
   const achievements = body.playerstats?.achievements;
   if (!body.playerstats?.success || !achievements || achievements.length === 0) {
@@ -209,7 +233,10 @@ export async function getGlobalRarity(
     `?gameid=${appid}&format=json`;
 
   try {
-    const response = await fetch(url, { cache: "no-store" });
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) return {};
 
     const body = (await response.json()) as {
@@ -249,10 +276,11 @@ export async function getGameDetails(appid: number): Promise<GameDetails> {
   const [detailsResult, reviewsResult] = await Promise.allSettled([
     fetch(`https://store.steampowered.com/api/appdetails?appids=${appid}&cc=gb`, {
       cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }).then((r) => r.json()),
     fetch(
       `https://store.steampowered.com/appreviews/${appid}?json=1&language=all&purchase_type=all&num_per_page=0`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     ).then((r) => r.json()),
   ]);
 
@@ -289,7 +317,7 @@ export async function getProtonRating(appid: number): Promise<ProtonRating | nul
   try {
     const response = await fetch(
       `https://www.protondb.com/api/v1/reports/summaries/${appid}.json`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
     if (!response.ok) return null;
 

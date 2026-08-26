@@ -20,6 +20,7 @@ import type { AchievementProgress } from "../agent/lib/steam";
 import type { PlaytimeEstimate } from "../agent/lib/playtime";
 import {
   findUngroundedNumbers,
+  rankGames,
   quotableMetrics,
   scoreGame,
   templateReason,
@@ -594,6 +595,84 @@ async function main() {
   await test("a single model is returned unwrapped", () => {
     const only = healthy("solo");
     assert.equal(withModelFallback([only]), only);
+  });
+
+  // --- the guard must bind a number to the RIGHT metric --------------------
+  // Regression: the allow-list was keyed on value+unit only, so every metric
+  // sharing a unit was interchangeable. "90 achievements left" passed because
+  // 90 was the number EARNED, and "4% done" passed because 4 was the rarity.
+  // Both are false statements built entirely from real numbers.
+
+  await test("a real number attached to the wrong metric is rejected", () => {
+    const m = {
+      achievementsEarned: 90,
+      achievementsTotal: 100,
+      achievementsLeft: 10,
+      achievementPercent: 90,
+      avgRarityUnearned: 4,
+    };
+    assert.deepEqual(findUngroundedNumbers("90 achievements left", m), ["90 achievements"]);
+    assert.deepEqual(findUngroundedNumbers("100 achievements left", m), ["100 achievements"]);
+    assert.deepEqual(findUngroundedNumbers("4% done", m), ["4%"]);
+  });
+
+  await test("correctly attributed numbers still pass", () => {
+    const m = {
+      achievementsEarned: 90,
+      achievementsTotal: 100,
+      achievementsLeft: 10,
+      achievementPercent: 90,
+      avgRarityUnearned: 4,
+    };
+    for (const good of [
+      "10 achievements left",
+      "90% done",
+      "4% unlock rate",
+      "you're at 90%",
+      "you're 90% done with 10 achievements left, unlocked by 4% of players",
+    ]) {
+      assert.deepEqual(findUngroundedNumbers(good, m), [], `should pass: ${good}`);
+    }
+  });
+
+  await test("both bounds of a range are checked, not just the one touching the unit", () => {
+    const m = { estHoursRemainingLow: 3, estHoursRemainingHigh: 7 };
+    assert.deepEqual(findUngroundedNumbers("roughly 3 to 7 hours left", m), []);
+    assert.deepEqual(findUngroundedNumbers("3-7h left", m), []);
+    // A fabricated lower bound used to ride along beside a real upper one.
+    assert.deepEqual(findUngroundedNumbers("roughly 2-7 hours left", m), ["2h"]);
+  });
+
+  await test("context matching is unit-aware", () => {
+    // "left" must not bind an HOURS claim to achievementsLeft.
+    const m = { achievementsLeft: 10, estHoursRemainingLow: 3, estHoursRemainingHigh: 7 };
+    assert.deepEqual(findUngroundedNumbers("3 to 7 hours left", m), []);
+  });
+
+  // --- ranking must not use the figure it refuses to show -------------------
+
+  await test("rarity-walled games rank by the honest estimate, not the linear one", () => {
+    const rare = fullRarityMap(1);
+    const cheapLooking = scoreGame(
+      { ...base, name: "Cheap", achievements: achievements({ earned: 98, total: 100, percent: 98 }), playtime: playtime({ hoursTo100: 200 }), rarity: rare },
+      "completionist",
+    );
+    const dearLooking = scoreGame(
+      { ...base, name: "Dear", achievements: achievements({ earned: 80, total: 100, percent: 80 }), playtime: playtime({ hoursTo100: 30 }), rarity: rare },
+      "completionist",
+    );
+    assert.equal(cheapLooking.facts.remainingIsFloor, true);
+    assert.equal(dearLooking.facts.remainingIsFloor, true);
+
+    const ranked = rankGames([dearLooking, cheapLooking]);
+    const byHonest = [cheapLooking, dearLooking].sort(
+      (x, y) => x.metrics.estHoursRemainingLow - y.metrics.estHoursRemainingLow,
+    );
+    assert.equal(
+      ranked[0].name,
+      byHonest[0].name,
+      "ordering must follow the scarcity range, which is what the card shows",
+    );
   });
 
   // --- pooledSettled must isolate failures --------------------------------

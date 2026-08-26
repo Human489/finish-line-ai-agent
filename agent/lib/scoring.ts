@@ -403,8 +403,18 @@ export function rankGames(games: ScoredGame[]): ScoredGame[] {
     const byCategory = CATEGORY_RANK[a.category] - CATEGORY_RANK[b.category];
     if (byCategory !== 0) return byCategory;
 
-    const aRemaining = a.metrics.estHoursRemaining ?? Number.POSITIVE_INFINITY;
-    const bRemaining = b.metrics.estHoursRemaining ?? Number.POSITIVE_INFINITY;
+    // quotableMetrics, not raw metrics: for a rarity-walled game
+    // estHoursRemaining is the linear figure this file spends forty lines
+    // explaining is understated, and ranking "least work first" by it put the
+    // most misleadingly-cheap-looking games at the top of their tier. The
+    // scarcity range is the honest ordering signal where one exists.
+    const workLeft = (game: ScoredGame) =>
+      game.metrics.estHoursRemainingLow ??
+      quotableMetrics(game).estHoursRemaining ??
+      Number.POSITIVE_INFINITY;
+
+    const aRemaining = workLeft(a);
+    const bRemaining = workLeft(b);
     if (aRemaining !== bRemaining) return aRemaining - bRemaining;
 
     return (b.metrics.achievementPercent ?? 0) - (a.metrics.achievementPercent ?? 0);
@@ -450,6 +460,38 @@ function canonicalUnit(written: string): Unit {
   return "h";
 }
 
+/**
+ * Words that identify WHICH metric a claim is about. Unit alone is not enough:
+ * achievementsEarned, achievementsTotal and achievementsLeft all carry the unit
+ * "achievements", so a shared value/unit allow-list accepted "90 achievements
+ * left" when 90 was the number EARNED and only 10 were left. Same for "%",
+ * where the completion percentage and the rarity percentage collide — "4% done"
+ * passed while 4 was the global unlock rate and the player was 90% done.
+ *
+ * A claim near one of these words is checked against that metric specifically.
+ * Claims with no such word fall back to the unit check, so ordinary phrasing
+ * ("you're at 90%") is not rejected for lacking a keyword.
+ */
+const METRIC_CONTEXT: { pattern: RegExp; keys: string[] }[] = [
+  { pattern: /\b(left|remaining|to go|outstanding)\b/i, keys: ["achievementsLeft"] },
+  { pattern: /\b(earned|unlocked already|you have)\b/i, keys: ["achievementsEarned"] },
+  { pattern: /\b(in total|total of|altogether)\b/i, keys: ["achievementsTotal"] },
+  { pattern: /\b(done|complete|completed|through)\b/i, keys: ["achievementPercent", "storyProgressPercent"] },
+  { pattern: /\b(unlock|rarity|rare|players|globally)\b/i, keys: ["avgRarityUnearned"] },
+];
+
+/**
+ * How much text AFTER a number counts as its context, and only after: the
+ * qualifying word essentially always follows the figure ("90% done", "10
+ * achievements left", "4% unlock rate"). Looking backwards as well caught
+ * unrelated words from earlier in the sentence — the category label alone was
+ * enough, with "Rarity Wall Ahead: 90% achievements" binding the 90 to the
+ * rarity metric and rejecting templateReason's own output. Kept short for the
+ * same reason: wide enough for a trailing word, too narrow to reach the next
+ * clause.
+ */
+const CONTEXT_WINDOW = 14;
+
 export function findUngroundedNumbers(
   reason: string,
   metrics: Record<string, number> | Record<string, number>[],
@@ -461,6 +503,9 @@ export function findUngroundedNumbers(
   const all = Array.isArray(metrics) ? metrics : [metrics];
 
   const allowed = new Set<string>();
+  /** metric key -> every value that key legitimately holds across the shortlist. */
+  const byMetric = new Map<string, Set<number>>();
+
   for (const game of all) {
     for (const [key, value] of Object.entries(game)) {
       const unit = unitFor(key);
@@ -470,19 +515,84 @@ export function findUngroundedNumbers(
       // Only rounding, deliberately: allowing floor and ceil too let "2h"
       // pass for a real figure of 1.1h, which is the exact kind of inflated
       // claim this check exists to catch.
-      for (const form of [value, Math.round(value)]) {
-        allowed.add(`${form}${unit}`);
-      }
+      const forms = [value, Math.round(value)];
+      for (const form of forms) allowed.add(`${form}${unit}`);
+
+      const seen = byMetric.get(key) ?? new Set<number>();
+      for (const form of forms) seen.add(form);
+      byMetric.set(key, seen);
     }
   }
 
-  const claims = reason.matchAll(
-    /(\d+(?:\.\d+)?)\s*(%|hours?\b|hrs?\b|h\b|achievements?\b)/gi,
-  );
+  /**
+   * True when the surrounding words name a specific metric AND the claimed
+   * number is not one that metric holds. Deliberately one-directional: it only
+   * ever rejects, and only when the text is explicit about what it is
+   * describing, so unlabelled phrasing keeps working.
+   */
+  const contradictsItsContext = (
+    value: number,
+    index: number,
+    unit: Unit,
+    raw: string,
+  ): boolean => {
+    const window = reason.slice(index, index + raw.length + CONTEXT_WINDOW).toLowerCase();
 
-  return [...claims]
-    .map((match) => ({ raw: match[0], key: `${match[1]}${canonicalUnit(match[2])}` }))
-    .filter((claim) => !allowed.has(claim.key))
+    for (const { pattern, keys } of METRIC_CONTEXT) {
+      if (!pattern.test(window)) continue;
+
+      // Unit-aware, or "left" would bind "3 to 7 hours left" to
+      // achievementsLeft and reject a perfectly good hours range.
+      const known = keys.filter((key) => byMetric.has(key) && unitFor(key) === unit);
+      if (known.length === 0) continue;
+      // Grounded if it matches any metric this context could refer to.
+      if (known.some((key) => byMetric.get(key)!.has(value))) continue;
+      return true;
+    }
+    return false;
+  };
+
+  const claims = [
+    ...reason.matchAll(
+      // Ranges first ("3-7 hours", "3 to 7h"), so the lower bound is checked
+      // too — matching only the number adjacent to the unit let a fabricated
+      // lower bound ride along beside a real upper one.
+      /(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*(%|hours?\b|hrs?\b|h\b|achievements?\b)/gi,
+    ),
+  ].flatMap((match) => {
+    const unit = canonicalUnit(match[3]);
+    return [match[1], match[2]].map((number) => ({
+      raw: `${number}${unit}`,
+      value: Number(number),
+      key: `${number}${unit}`,
+      unit,
+      index: match.index ?? 0,
+    }));
+  });
+
+  const seenSpans = new Set(claims.map((claim) => claim.index));
+
+  for (const match of reason.matchAll(
+    /(\d+(?:\.\d+)?)\s*(%|hours?\b|hrs?\b|h\b|achievements?\b)/gi,
+  )) {
+    const index = match.index ?? 0;
+    // Skip numbers already covered as part of a range span above.
+    if ([...seenSpans].some((start) => index >= start && index - start < 24)) continue;
+    claims.push({
+      raw: match[0],
+      value: Number(match[1]),
+      key: `${match[1]}${canonicalUnit(match[2])}`,
+      unit: canonicalUnit(match[2]),
+      index,
+    });
+  }
+
+  return claims
+    .filter(
+      (claim) =>
+        !allowed.has(claim.key) ||
+        contradictsItsContext(claim.value, claim.index, claim.unit, claim.raw),
+    )
     .map((claim) => claim.raw);
 }
 

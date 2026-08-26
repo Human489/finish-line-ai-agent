@@ -19,6 +19,17 @@
  * playtime signal at all any more.
  */
 
+/**
+ * Every outbound call is bounded. `fetch` rejects on a transport error but
+ * waits forever on a server that accepts the connection and then goes quiet,
+ * and none of the try/catch-to-NO_DATA handling below covers a promise that
+ * never settles. It matters most here because the token handshake is
+ * single-flight: every concurrent lookup awaits the same init promise, so one
+ * hung request stalls the whole enrichment pool and with it the turn. An abort
+ * surfaces as an ordinary failure and degrades to NO_DATA like anything else.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -62,6 +73,7 @@ async function initToken(): Promise<SearchToken | null> {
       const response = await fetch(`${ORIGIN}/api/search/site/init?t=${Date.now()}`, {
         headers: { "User-Agent": UA, Referer: `${ORIGIN}/` },
         cache: "no-store",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) return null;
 
@@ -167,6 +179,7 @@ async function search(title: string, allowRetry = true): Promise<HltbGame[] | nu
       },
       body: JSON.stringify(searchBody(title, auth.hpKey, auth.hpVal)),
       cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     // Expired or rotated token. Re-init once, exactly as their client does.
