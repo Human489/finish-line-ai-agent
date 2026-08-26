@@ -370,6 +370,29 @@ export function findUngroundedNumbers(
     .map((claim) => claim.raw);
 }
 
+/**
+ * The metrics a game may legitimately be quoted with.
+ *
+ * This is NOT the same as `game.metrics`. When `remainingIsFloor` is set, the
+ * hours figure is known not to hold and is withheld from the model entirely —
+ * so it must also be withheld from the grounding check, or the check would
+ * accept the very number the suppression exists to keep off the screen. A
+ * model that produced "about 1.1 hours" for a rarity-walled game would be
+ * quoting a real value from `metrics` and would pass, which defeats the point.
+ *
+ * Both `toModelOutput` and the render-time guard project through here so the
+ * two can never disagree about what is quotable.
+ */
+export function quotableMetrics(game: {
+  metrics: Record<string, number>;
+  facts: { remainingIsFloor?: boolean };
+}): Record<string, number> {
+  if (!game.facts.remainingIsFloor) return game.metrics;
+  const quotable = { ...game.metrics };
+  delete quotable.estHoursRemaining;
+  return quotable;
+}
+
 /** Deterministic sentence used when the model has nothing trustworthy to add. */
 export function templateReason(game: ScoredGame): string {
   const parts: string[] = [];

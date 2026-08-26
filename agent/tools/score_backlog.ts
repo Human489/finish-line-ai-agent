@@ -15,6 +15,7 @@ import {
   rankGames,
   scoreGame,
   templateReason,
+  quotableMetrics,
   type Mode,
   type ScoredGame,
 } from "../lib/scoring";
@@ -66,14 +67,13 @@ export default defineTool({
         // No fallbackReason here: it restates the card, and the model is now
         // told not to. It stays on the full output for the UI contract.
         games: output.scored.map((game) => {
-          // Withhold the hours figure entirely when it is known not to hold.
+          // Withholds the hours figure entirely when it is known not to hold.
           // Telling the model "this is a minimum" was not enough — it still
           // rendered as "just over an hour", which is the wrong impression.
-          // If it cannot see the number, it cannot quote it.
-          const { estHoursRemaining, ...metrics } = game.metrics;
-          const shown = game.facts.remainingIsFloor
-            ? metrics
-            : { ...metrics, estHoursRemaining };
+          // If it cannot see the number, it cannot quote it. Shared with the
+          // render-time grounding guard, so what the model may see and what it
+          // may be quoted saying cannot drift apart.
+          const shown = quotableMetrics(game);
 
           return {
             name: game.name,
@@ -164,7 +164,7 @@ export default defineTool({
         ...game,
         // The numbers the model is allowed to quote for this game, and a
         // ready-made sentence to fall back on.
-        allowedNumbers: Object.values(game.metrics),
+        allowedNumbers: Object.values(quotableMetrics(game)),
         fallbackReason: templateReason(game),
       })),
       unknownAppids: missing,

@@ -8,7 +8,7 @@ import {
   CATEGORY_DESCRIPTIONS,
   type Category,
 } from "@/agent/lib/categories";
-import { findUngroundedNumbers, type ScoredGame } from "@/agent/lib/scoring";
+import { findUngroundedNumbers, quotableMetrics, type ScoredGame } from "@/agent/lib/scoring";
 import {
   Conversation,
   ConversationContent,
@@ -583,10 +583,11 @@ function GroundedText({
   // Checked against every game in the shortlist, not just the top one: the
   // model is asked for a comparative sentence ("Sifu beats Terraria's 33h"),
   // so a figure belonging to any scored game is legitimately grounded.
-  const ungrounded = findUngroundedNumbers(
-    text,
-    output.scored.map((game) => game.metrics),
-  );
+  // quotableMetrics, not raw metrics: a game whose hours figure is a floor has
+  // that figure withheld from the model, so it must be withheld from the
+  // allowed set too — otherwise the guard would accept the exact number the
+  // suppression exists to keep off the screen.
+  const ungrounded = findUngroundedNumbers(text, output.scored.map(quotableMetrics));
 
   if (ungrounded.length === 0) {
     return <MessageResponse>{text}</MessageResponse>;

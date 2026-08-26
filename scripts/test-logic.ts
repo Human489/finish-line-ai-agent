@@ -17,7 +17,12 @@ import { pooledSettled } from "../agent/lib/cache";
 import { CATEGORY_LABELS, THRESHOLDS, type Category } from "../agent/lib/categories";
 import type { AchievementProgress } from "../agent/lib/steam";
 import type { PlaytimeEstimate } from "../agent/lib/playtime";
-import { findUngroundedNumbers, scoreGame, templateReason } from "../agent/lib/scoring";
+import {
+  findUngroundedNumbers,
+  quotableMetrics,
+  scoreGame,
+  templateReason,
+} from "../agent/lib/scoring";
 
 let failures = 0;
 let run = 0;
@@ -266,6 +271,45 @@ async function main() {
         `templateReason tripped the checker: ${templateReason(scored)}`,
       );
     }
+  });
+
+  // --- suppressed figures must not be quotable ----------------------------
+  // Regression, found by running a real profile through the agent: the guard
+  // was checking prose against the FULL metrics, so "Sifu needs about 1.1
+  // hours" was accepted — 1.1 really is estHoursRemaining. But that figure is
+  // withheld from the model precisely because it does not hold for a rarity
+  // walled game, so accepting it defeats the suppression entirely.
+
+  await test("quotableMetrics drops the hours figure only when it is a floor", () => {
+    const walled = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
+      "completionist",
+    );
+    const normal = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: COMMON },
+      "completionist",
+    );
+
+    assert.equal(walled.facts.remainingIsFloor, true);
+    assert.ok(walled.metrics.estHoursRemaining !== undefined, "fixture must have hours to suppress");
+    assert.equal(quotableMetrics(walled).estHoursRemaining, undefined);
+
+    assert.equal(normal.facts.remainingIsFloor, false);
+    assert.equal(quotableMetrics(normal).estHoursRemaining, normal.metrics.estHoursRemaining);
+  });
+
+  await test("a suppressed hours figure is rejected in prose", () => {
+    const walled = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
+      "completionist",
+    );
+    const hours = walled.metrics.estHoursRemaining;
+    const sentence = `It needs about ${hours} hours to finish.`;
+
+    // Checked against the raw metrics it would wrongly pass; against the
+    // quotable projection it must not.
+    assert.deepEqual(findUngroundedNumbers(sentence, walled.metrics), []);
+    assert.deepEqual(findUngroundedNumbers(sentence, quotableMetrics(walled)), [`${hours} hours`]);
   });
 
   // --- pooledSettled must isolate failures --------------------------------
