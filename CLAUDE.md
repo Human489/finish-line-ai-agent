@@ -29,6 +29,8 @@ npx tsx scripts/warm-eve.ts http://127.0.0.1:4278
 
 `.env.local` must contain `EVE_BASE_URL=http://127.0.0.1:4278` for Next to proxy to that process instead of spawning its own. **Never set `EVE_BASE_URL` in production** — it points at localhost.
 
+It also needs `STEAM_WEB_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, and — for document search — `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_VECTORIZE_INDEX`. Without the `CF_*` three, `search_documents` reports itself unavailable rather than failing the turn.
+
 Restart the eve process after changing any env var or `agent/**` file; it reads `.env.local` once at spawn.
 
 ## Checks
@@ -106,6 +108,47 @@ When adding a metric, add it to `scoring.ts` — never let the model derive one.
 
 **`facts.dataGaps` is model-visible.** `toModelOutput` forwards it verbatim as `caveats`, so a caveat that quotes a number hands that number to the model no matter what `quotableMetrics` strips. This was a real leak: the floor caveat used to read "the 1.1h figure assumes average difficulty and does not hold", which both re-fed the model the withheld value and printed it on the card immediately below the line that replaced it. Write caveats that describe the problem without citing the figure.
 
+### Document retrieval (RAG)
+
+The Steam tools answer *what is in this library*. A corpus of 12 Valve and ProtonDB documents answers *how any of this works* — why a game is missing, what Steam Families shares, how playtime is recorded, what Proton cannot run. Questions the agent used to decline.
+
+`agent/lib/rag.ts` embeds the question with Cloudflare Workers AI and queries a Vectorize index; `agent/tools/search_documents.ts` is the tool. Needs `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_VECTORIZE_INDEX`.
+
+**Ingestion is a separate, manual step** and lives outside this repo, in [gai-rag-skeleton](https://github.com/HamadaFMahdi/gai-rag-skeleton): put PDFs in its `corpus/`, `npm run ingest`. The agent only ever reads. Two things about it that cost real time:
+
+- The skeleton reads `process.env` directly and **nothing loads its `.env`** — add `--env-file=.env` to its npm scripts or export the vars per shell. A missing `CF_VECTORIZE_INDEX` silently defaults to `my-rag-index`, so ingest fails with "index not found" rather than "you forgot a variable".
+- Deleting a file from `corpus/` does **not** remove its vectors. Delete and recreate the index, and delete `ingest-log.jsonl` (ingest is resumable and skips anything logged).
+
+`EMBED_MODEL` in `rag.ts` **must** match the model the corpus was ingested with. Mismatched models return confident nonsense rather than an error — the index's 768 dimensions exist because `@cf/baai/bge-base-en-v1.5` emits 768 numbers.
+
+#### The relevance floor is the whole feature
+
+`RELEVANCE_FLOOR = 0.75`, measured against this corpus rather than inherited from the 0.62 the brief suggested. Real hits land 0.83–0.89; a total miss sits at 0.58 (`bge` has a high similarity floor, so 0.58 is effectively zero, not "half relevant").
+
+The number matters because of one case: **"what does the Borked rating mean?" retrieves Valve's Steam Deck compatibility docs at 0.64–0.74** — a different rating system from ProtonDB's, and nothing in the corpus defines ProtonDB's tiers because ProtonDB does not publish them. At 0.62 the agent answered it confidently and wrongly.
+
+Two things that are easy to get wrong here:
+
+- **Measure through the agent, not by querying the index.** The model rephrases the question before searching, and phrasing moves the score a long way — the same Borked question scored 0.6423 by hand and 0.7375 through the agent.
+- **It gates the top score only**, deciding whether to answer at all. Filtering every chunk by it would be worse: two irrelevant chunks sit at 0.726 on the missing-games question, above any threshold that still admits the genuine secondary hits.
+
+#### A weak search must not erase a good one
+
+Observed live: search one cleared the floor with the right document, the model searched again, the second fell below, and it concluded the documents did not cover the question. The best search of a conversation is now kept in the session cache (`bestDocSearch`) and offered back whenever a later one finds nothing.
+
+#### Prompting lessons, both learned the hard way
+
+- Giving the model an **example refusal sentence** made it parrot that sentence identically for every question.
+- Describing the qualities instead ("in your own words, do not reuse a stock phrase") made it **reason aloud about phrasing**, and that reasoning landed *inside* the final message where the render-time fix cannot reach it.
+
+Terse rules plus an explicit "reply with the answer and nothing else" fixed both. If you loosen the tone guidance in `instructions.md`, expect the thinking to come back.
+
+### Interim narration must not reach the player
+
+eve emits `message.completed` for interim narration as well as the final reply, so rendering every text part put the model's working-out in the transcript ("Let's do another query on why games might not work"). `app/page.tsx` treats any text part **before the last tool call** as deliberation and does not render it, and `hasVisibleText` counts only renderable text so narration cannot suppress `FallbackAnswer`.
+
+This only catches narration in a *separate* part. Deliberation concatenated into the final message has to be prevented by the prompt — see above.
+
 ### Model fallback on rate limits
 
 The free Gemini tier fails two ways that are transient and not the app's fault: `429 RESOURCE_EXHAUSTED` (per-minute or per-day cap) and `503 UNAVAILABLE` ("high demand"). Both were seen here — `gemini-3.5-flash-lite` returned 503 for a stretch while `gemini-3.5-flash` and `gemini-3.6-flash` answered normally throughout.
@@ -159,6 +202,7 @@ eve grants every agent `bash`, `read_file`, `write_file`, `web_fetch`, `web_sear
 | Global achievement rarity, ProtonDB, vanity resolution | none | Keyless |
 | `appdetails` + `appreviews` (genre, rating) | none | `appdetails` does **not** batch; one appid per request |
 | HowLongToBeat | none, but token-gated | Unofficial |
+| Cloudflare Workers AI + Vectorize | `CF_API_TOKEN` | Embeddings and vector search over the document corpus |
 
 **HowLongToBeat has no official API.** `agent/lib/playtime.ts` mirrors the site's own client: `GET /api/search/site/init` for a `{token, hpKey, hpVal}`, then `POST /api/search/site` with `x-auth-token`/`x-hp-key`/`x-hp-val` headers *and* `hpKey` echoed in the body, re-initialising once on 403. It is allowed to fail and returns "no data" rather than throwing.
 
@@ -183,7 +227,11 @@ Category badge colours need a per-theme pair (`text-x-700 dark:text-x-400`). `bg
 ## Known issues / unfinished
 
 - **eve's dev retry loop is understood and mostly defused** — see "Why the first turn is slow". The remaining unfixable part is a keep-alive mismatch: `@workflow/world-local` pools sockets for 30s (`keepAliveTimeout: 30000`, hardcoded) while eve's dev server is a stock Node server that closes idle sockets at 5s. Reproduced directly — a reused socket succeeds after 2s and 4s idle and gets `ECONNRESET` after 6s. Neither side is configurable. In practice it costs a 5s backoff occasionally rather than the storm it used to, because the raised transport timeouts stop the far more common cause. No official fix exists in eve 0.44.4.
-- **Not deployed.** Vercel should be a **new project** (not "new agent"); `withEve()` deploys the Next app and eve runtime as one project. `npx next build` passes locally.
+- **Deployment.** Vercel should be a **new project** (not "new agent"); `withEve()` deploys the Next app and eve runtime as one project. Needs `STEAM_WEB_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` and the three `CF_*` vars set in Vercel. **Never set `EVE_BASE_URL` there** — it points at localhost.
+- **ProtonDB's tiers are undocumented.** The cards print "Borked on Linux", and no first-party source defines Borked/Bronze/Gold/Platinum — checked all three ProtonDB help pages and `/contribute`. Valve documents *Steam Deck Verified*, a different system. The agent correctly says it does not know; adding a third-party explainer is the only fix, and it would not be authoritative.
+- **Citation is prompted, not enforced.** The agent usually ends a document answer with `(source: file.pdf)`, but not always. The reliable fix is the same one used for grounding: render the sources under the answer from the tool output, rather than asking the model to remember.
+- **Retrieval quality, not the threshold, is the real limit.** Genuine hits and near-misses overlap in the 0.73–0.76 band. Chunks are 200 words; a reranker (`@cf/baai/bge-reranker-base`, retrieve 20 → narrow to 5) or contextual retrieval would separate them properly.
+- **Corpus PDFs carry reader-mode noise** — `about:reader?url=...` headers and page footers survive into chunks. Harmless but it wastes tokens and shows up in cited passages.
 - **Auth is `none()`** in `agent/channels/eve.ts` — anyone with the URL can spend the Gemini quota, and the free tier's daily cap is low. Add auth before sharing the URL.
 - **Model still occasionally re-calls tools** it already has results for, despite instructions and tool descriptions saying not to. This is why grounding is enforced in code rather than by prompting — the same unreliability applies to "only quote numbers you were given".
 - **`ask_question` and the verify route are the remaining unauthenticated surfaces.** `app/api/steam/verify` now rate-limits to 10 requests/minute/IP, but that counter is per-process and therefore close to useless on serverless, where each instance keeps its own. It is a speed bump, not a control; real protection needs auth or a shared store.
