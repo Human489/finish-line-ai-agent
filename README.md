@@ -24,6 +24,7 @@ The most useful thing I learned is in the architecture below. An agent that can 
 - **Suggest something new to start** from the games you have never launched
 - **Filter by genre or review score** using real Steam store data rather than guessing from a title
 - **Report Linux/Steam Deck compatibility** from ProtonDB as context on any recommendation
+- **Explain how the underlying systems work** — why a game is missing from a library, what Steam Families shares, what Proton cannot run — from a corpus of Valve and ProtonDB documentation
 
 And, just as deliberately, it will tell you when it **cannot** answer: a game HowLongToBeat has never heard of, a Steam lookup that failed, an achievement grind whose length genuinely cannot be known.
 
@@ -38,6 +39,8 @@ And, just as deliberately, it will tell you when it **cannot** answer: a game Ho
 | *"Something well-reviewed and short."* | Combines Steam review scores with hours-to-beat |
 | *"How far through Hollow Knight am I?"* | Skips the sweep and scores that one game |
 | *"Does Sifu work on Linux?"* | Reports the ProtonDB tier |
+| *"Why is a game missing from my library?"* | Searches the reference documents and answers with the source file |
+| *"What does the Borked rating mean?"* | Says it doesn't know — nothing in the documents defines it |
 
 It will decline anything it cannot ground in a tool call — including how much a game cost, since it has no pricing data of any kind.
 
@@ -68,6 +71,7 @@ Linux support is reported alongside but is never a category — a game can be ne
 | `get_game_details` | Genres and Steam review rating |
 | `get_playtime_estimate` | Hours to beat and to 100% for one game |
 | `get_proton_rating` | ProtonDB compatibility tier |
+| `search_documents` | Searches a reference corpus for how Steam, ProtonDB and Proton work |
 
 ## How it stays honest
 
@@ -81,9 +85,21 @@ Three ideas do most of the work:
 
 Failed lookups are never rounded off into facts, either. "This game has no achievements" and "Steam did not answer" are different sentences, and the app says whichever is true.
 
+## Answering questions the APIs can't
+
+Steam's APIs know what you own and how far through it you are. They cannot tell you *why* a game is missing from your library, what Steam Families actually shares, or why some games will never run on Linux. Those answers live in documentation, so the agent has a small library of it: twelve Valve and ProtonDB pages, saved as PDFs.
+
+This uses **retrieval-augmented generation**, which is simpler than it sounds. Each document is split into ~200-word chunks, and every chunk is converted by an embedding model into a list of 768 numbers describing its meaning — passages about similar things end up with similar numbers, even when they share no words. Those are stored in a vector index. When you ask a question, the same thing happens to your question, and the index returns whichever chunks sit nearest to it, each with a similarity score. Those passages go into the prompt, and the agent answers from them and names the file it used.
+
+The interesting part is the score. **A search always returns something** — the nearest chunks exist whether or not they're relevant — so a threshold decides whether "nearest" is actually good enough to answer from. Below it, the agent says it doesn't know.
+
+That threshold is doing real work here. Ask *"what does the Borked rating mean?"* and retrieval confidently returns Valve's **Steam Deck Verified** documentation, which describes an entirely different rating system — because ProtonDB doesn't publish its tier definitions anywhere. It scores just high enough to look like an answer and is completely wrong. The threshold was measured against this corpus rather than guessed, and it's the difference between the agent admitting ignorance and inventing a confident falsehood.
+
+Ingestion is a separate, manual step — the agent only ever reads the index.
+
 ## Running it
 
-Needs a free [Steam Web API key](https://steamcommunity.com/dev/apikey) and a Google AI API key in `.env.local`. Then, in two terminals:
+Needs a free [Steam Web API key](https://steamcommunity.com/dev/apikey), a Google AI API key, and — for document search — a Cloudflare account ID, API token and Vectorize index name, all in `.env.local`. Then, in two terminals:
 
 ```bash
 # eve, on a fixed port, with the transport timeouts raised
