@@ -726,6 +726,96 @@ function GroundedText({
   );
 }
 
+type DocumentSearchOutput = {
+  matches: { score: number; source: string; text: string }[];
+  nothingRelevant: boolean;
+  topScore: number | null;
+  error: string | null;
+  relevanceFloor: number;
+  question: string;
+};
+
+/**
+ * What the document search actually retrieved, shown rather than described.
+ *
+ * The score matters as much as the passage. A retrieved chunk is not evidence
+ * on its own — the whole reason this agent can answer "why is a game missing"
+ * but refuses "what does Borked mean" is that one scores 0.89 and the other
+ * 0.64, and the second is a near-miss from a document about a different rating
+ * system entirely. Showing the number and the filename is what lets a person
+ * check that for themselves instead of taking the answer on trust.
+ */
+function DocumentMatches({ part }: { part: DynamicToolPart }) {
+  const output = part.output as DocumentSearchOutput | undefined;
+
+  if (part.state !== "output-available" || !output) {
+    return <Shimmer className="text-sm text-muted-foreground">Searching the documents…</Shimmer>;
+  }
+
+  if (output.error) {
+    return (
+      <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+        Document search unavailable — {output.error}
+      </p>
+    );
+  }
+
+  // Collapsed by default. The answer is what the player asked for; the
+  // passages are the working behind it, and a wall of raw chunks above every
+  // reply is noise. The summary line stays visible because the SCORE is the
+  // part that matters — it is what turns "I don't know" from a broken-looking
+  // agent into a visible, checkable decision.
+  const sources = [...new Set(output.matches.map((match) => match.source))];
+
+  return (
+    <details className="group space-y-2 rounded-lg border p-3">
+      <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-x-3 gap-y-1 list-none">
+        <span className="min-w-0 text-xs font-medium">
+          {output.nothingRelevant
+            ? "Nothing relevant in the documents"
+            : `${output.matches.length} passage${output.matches.length === 1 ? "" : "s"} · ${sources.join(", ")}`}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+          best {output.topScore ?? "—"} · need {output.relevanceFloor}
+        </span>
+      </summary>
+      <div className="mt-2 space-y-2">
+
+      {output.nothingRelevant && (
+        // Shown, not hidden: the near-misses are the interesting part. Seeing
+        // 0.64 against a 0.72 floor explains WHY the agent said it did not
+        // know, which is more trustworthy than an unexplained refusal.
+        <p className="text-[11px] text-muted-foreground">
+          The closest passages scored below the threshold, so they were not used.
+        </p>
+      )}
+
+      <ul className="space-y-1.5">
+        {output.matches.map((match, index) => (
+          <li key={`${match.source}-${index}`} className="min-w-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="truncate text-[11px] font-medium">{match.source}</span>
+              <span
+                className={`shrink-0 text-[11px] tabular-nums ${
+                  match.score >= output.relevanceFloor
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {match.score}
+              </span>
+            </div>
+            <p className="line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+              {match.text}
+            </p>
+          </li>
+        ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 function ScoreBacklogAnswer({ part }: { part: DynamicToolPart }) {
   const output = part.output as ScoreBacklogOutput | undefined;
 
@@ -1100,11 +1190,13 @@ export default function Home() {
                             );
                           }
 
-                          return part.toolName === "score_backlog" ? (
-                            <ScoreBacklogAnswer key={part.toolCallId} part={part} />
-                          ) : (
-                            <ToolCall key={part.toolCallId} part={part} />
-                          );
+                          if (part.toolName === "score_backlog") {
+                            return <ScoreBacklogAnswer key={part.toolCallId} part={part} />;
+                          }
+                          if (part.toolName === "search_documents") {
+                            return <DocumentMatches key={part.toolCallId} part={part} />;
+                          }
+                          return <ToolCall key={part.toolCallId} part={part} />;
                         }
 
                         return null;
