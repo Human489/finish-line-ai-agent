@@ -21,6 +21,14 @@ type SessionCache = {
   proton: Map<number, unknown>;
   rarity: Map<number, unknown>;
   details?: Map<number, unknown>;
+  /**
+   * The best document search this conversation has managed, so a later, weaker
+   * search cannot erase it. Observed live: a first search cleared the relevance
+   * floor with the right document, the model searched again, the second came
+   * back below the floor, and it concluded the documents did not cover the
+   * question — discarding evidence it had already been given.
+   */
+  bestDocSearch?: unknown;
   /** Updated on every `cacheFor` call; drives both TTL and LRU eviction. */
   lastAccess: number;
 };

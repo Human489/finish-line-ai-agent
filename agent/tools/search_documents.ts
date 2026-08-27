@@ -1,6 +1,10 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { cacheFor } from "../lib/cache";
 import { RELEVANCE_FLOOR, searchDocuments, type DocumentMatch } from "../lib/rag";
+
+/** The best search this conversation has produced, kept per session. */
+type BestSearch = { question: string; topScore: number; matches: DocumentMatch[] };
 
 /**
  * The reference-document half of the agent's grounding.
@@ -39,19 +43,39 @@ export default defineTool({
     nothingRelevant: boolean;
     topScore: number | null;
     error: string | null;
+    earlierSearch: BestSearch | null;
   }) {
     if (output.error) {
       return {
         type: "text" as const,
-        value: `Document search unavailable: ${output.error} Tell the player you could not check your reference material, and do not answer from general knowledge.`,
+        value: `Document search unavailable: ${output.error} Tell the player something went wrong looking it up and they could try again — in one plain sentence, without naming the machinery. Do not answer from general knowledge instead.`,
       };
     }
 
     if (output.nothingRelevant) {
+      // A refusal is only honest if nothing usable was found AT ALL this
+      // conversation. Earlier in this session a search may already have cleared
+      // the floor, and throwing that away to say "not covered" would be a false
+      // statement about the corpus.
+      if (output.earlierSearch) {
+        return {
+          type: "json" as const,
+          value: {
+            note: `This search found nothing above the ${RELEVANCE_FLOOR} threshold, but an earlier search in this conversation DID find usable passages. Judge whether they answer the question. If they do, answer from them in plain words and end with the filename. If they genuinely do not, say you do not know — one ordinary sentence, and do not mention searching, documents or scores.`,
+            earlierQuestion: output.earlierSearch.question,
+            passages: output.earlierSearch.matches.map((match) => ({
+              source: match.source,
+              score: match.score,
+              text: match.text,
+            })),
+          },
+        };
+      }
+
       return {
         type: "text" as const,
         value:
-          "Nothing in the reference documents answers this. Say so plainly — that the documents do not cover it — and do NOT answer from your own knowledge of Steam, Proton or Linux. An honest 'I don't know' is the correct answer here.",
+          "Nothing usable. Reply with one plain sentence saying you do not know, naming what was asked — e.g. \"I don't know what the Borked rating means.\" Nothing else: no preamble, no reasoning, no mention of searching, documents, passages or scores. Do not answer from your own knowledge of Steam, Proton or Linux instead.",
       };
     }
 
@@ -64,15 +88,32 @@ export default defineTool({
           text: match.text,
         })),
         rules:
-          "Answer ONLY from these passages. You MUST end your answer by naming the source file you used, exactly as written in `source` above — for example: (source: steam-families.pdf). An answer without that filename is incomplete, because the player cannot check it otherwise. Not every passage will be relevant — ignore the ones that do not bear on the question rather than forcing them in. If none of them actually answer it, say the documents do not cover it.",
+          "Answer now from these passages only, and do NOT search again. Reply with the answer itself and nothing else: no preamble, no reasoning, no \"according to the documents\". Ignore passages that do not bear on the question. End with the filename in brackets exactly as written in `source`, e.g. (source: steam-families.pdf). If none of them answer it, reply with one plain sentence saying you do not know.",
       },
     };
   },
-  async execute({ question }) {
+  async execute({ question }, ctx) {
     const result = await searchDocuments(question);
+    const cache = cacheFor(ctx.session.id);
+    const previous = cache.bestDocSearch as BestSearch | undefined;
+
+    // Remember the strongest search of the conversation, and never let a weaker
+    // one displace it.
+    if (!result.nothingRelevant && result.topScore !== null) {
+      if (!previous || result.topScore > previous.topScore) {
+        cache.bestDocSearch = {
+          question,
+          topScore: result.topScore,
+          matches: result.matches,
+        } satisfies BestSearch;
+      }
+    }
 
     return {
       ...result,
+      // Only offered when this search came back empty — otherwise the model has
+      // two sets of passages and no reason to prefer either.
+      earlierSearch: result.nothingRelevant ? (previous ?? null) : null,
       // Surfaced for the UI so a person can see where the cut-off sits, rather
       // than having to infer it from the scores.
       relevanceFloor: RELEVANCE_FLOOR,
