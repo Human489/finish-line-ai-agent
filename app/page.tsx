@@ -106,6 +106,48 @@ function CategoryLegend() {
   );
 }
 
+/**
+ * Base UI's Button does not emit the `disabled` attribute during SSR, so
+ * passing `disabled` produced a hydration mismatch — server rendered
+ * `disabled={null}`, client `disabled={true}`, and React reported it as "this
+ * won't be patched up", meaning the attribute could stay stale. A button whose
+ * disabled state does not survive hydration is exactly the symptom of one that
+ * cannot be clicked.
+ *
+ * So the disabled state is expressed in ways that render identically on both
+ * sides: aria-disabled for assistive tech, pointer-events-none to actually stop
+ * the click, and opacity for the visual cue. Every submit handler already
+ * guards its own preconditions, so nothing depends on the real attribute for
+ * correctness.
+ */
+function inertWhen(disabled: boolean) {
+  return {
+    "aria-disabled": disabled || undefined,
+    className: disabled ? "pointer-events-none opacity-60" : undefined,
+  };
+}
+
+/**
+ * Which text parts are the answer, and which are the model thinking aloud.
+ *
+ * eve emits a message.completed for interim narration as well as the final
+ * reply, so a turn that calls a tool mid-thought produces text like "Let's do
+ * another query on why games might not work" — deliberation the player should
+ * never see. Rendering every text part put that straight in the transcript.
+ *
+ * The rule: text that comes BEFORE a tool call is working-out; only text after
+ * the last tool call is the answer. Deterministic, and needs no cooperation
+ * from the model, which is the point — asking it not to narrate is the kind of
+ * instruction it ignores.
+ */
+function lastToolIndex(parts: EveMessage["parts"]): number {
+  let last = -1;
+  parts.forEach((part, index) => {
+    if (part.type === "dynamic-tool") last = index;
+  });
+  return last;
+}
+
 const SUGGESTIONS = [
   "What should I finish?",
   "What game should I start next?",
@@ -630,7 +672,11 @@ function InputRequestCard({
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
-          <Button type="submit" className="h-10 px-4" disabled={text.trim().length === 0}>
+          <Button
+            type="submit"
+            className={`h-10 px-4 ${inertWhen(text.trim().length === 0).className ?? ""}`}
+            aria-disabled={inertWhen(text.trim().length === 0)["aria-disabled"]}
+          >
             Answer
           </Button>
         </form>
@@ -957,8 +1003,8 @@ function ProfileGate({ onVerified }: { onVerified: (profile: VerifiedProfile) =>
             size is h-8, which left the two visibly misaligned. */}
         <Button
           type="submit"
-          className="h-10 px-4"
-          disabled={value.trim().length === 0 || checking}
+          className={`h-10 px-4 ${inertWhen(value.trim().length === 0 || checking).className ?? ""}`}
+          aria-disabled={inertWhen(value.trim().length === 0 || checking)["aria-disabled"]}
         >
           {checking ? "Checking…" : "Continue"}
         </Button>
@@ -1116,8 +1162,15 @@ export default function Home() {
 
               {agent.data.messages.map((message, messageIndex) => {
                 const isLastMessage = messageIndex === agent.data.messages.length - 1;
-                const hasVisibleText = message.parts.some(
-                  (part) => part.type === "text" && part.text.trim().length > 0,
+                // Counts only text that will actually be rendered — interim
+                // narration must not suppress the deterministic fallback, or a
+                // turn whose only "text" was thinking-out-loud would show
+                // nothing at all.
+                const parts = dedupeParts(message.parts);
+                const finalTextFrom = lastToolIndex(parts);
+                const hasVisibleText = parts.some(
+                  (part, index) =>
+                    part.type === "text" && index > finalTextFrom && part.text.trim().length > 0,
                 );
 
                 // Once every tool card is done, there is a real gap while the
@@ -1141,7 +1194,7 @@ export default function Home() {
                 // not the model went silent: with no text it supplies the
                 // fallback sentence, and with text it supplies the numbers that
                 // text is checked against.
-                const scoreOutput = dedupeParts(message.parts).find(
+                const scoreOutput = parts.find(
                   (part): part is DynamicToolPart =>
                     part.type === "dynamic-tool" &&
                     part.toolName === "score_backlog" &&
@@ -1155,8 +1208,12 @@ export default function Home() {
                 return (
                   <Message key={message.id} from={message.role}>
                     <MessageContent>
-                      {dedupeParts(message.parts).map((part, index) => {
+                      {parts.map((part, index) => {
                         if (part.type === "text") {
+                          // Interim narration: the model talking to itself
+                          // between tool calls.
+                          if (message.role === "assistant" && index < finalTextFrom) return null;
+
                           if (message.role === "user") {
                             return (
                               <MessageResponse key={index}>
@@ -1254,8 +1311,8 @@ export default function Home() {
             ) : (
               <Button
                 type="submit"
-                className="h-10 px-4"
-                disabled={input.trim().length === 0}
+                className={`h-10 px-4 ${inertWhen(input.trim().length === 0).className ?? ""}`}
+                aria-disabled={inertWhen(input.trim().length === 0)["aria-disabled"]}
               >
                 Send
               </Button>
