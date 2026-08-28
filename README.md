@@ -193,6 +193,11 @@ same file share exactly 40 words at the boundary.
 
 The corpus I used contains twelve pages of Valve and ProtonDB documentation saved as PDFs. They are not committed here because they are not mine to redistribute.
 
+All twelve are public help pages, saved to PDF from a browser. The Steam ones
+come from Valve's own support and Steam Deck pages, the Proton ones from the
+Proton project and ProtonDB's site. Print to PDF rather than screenshotting: the
+text has to be selectable or nothing gets extracted.
+
 These are the twelve files the current index was built from, so a rebuild that
 matches it needs the equivalent page saved under each name:
 
