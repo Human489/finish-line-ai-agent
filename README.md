@@ -189,13 +189,28 @@ against a 200-word index.
 
 The corpus I used contains twelve pages of Valve and ProtonDB documentation saved as PDFs. They are not committed here because they are not mine to redistribute.
 
-The documents cover things like:
+These are the twelve files the current index was built from, so a rebuild that
+matches it needs the equivalent page saved under each name:
 
-- Steam library and privacy settings
-- Steam Families
-- achievements and global unlock percentages
-- how playtime is recorded
-- Proton and Steam Deck compatibility
+| File | What it covers |
+| --- | --- |
+| `steam-missing-games.pdf` | Why an owned game does not appear in the library |
+| `steam-families.pdf` | Steam Families, and what is and is not shared |
+| `steam-private-games.pdf` | Marking games private, and profile privacy settings |
+| `steam-achievements.pdf` | Achievements and global unlock percentages |
+| `steam-cloud.pdf` | Steam Cloud saves |
+| `steam-offline-mode.pdf` | Offline mode, and how playtime is recorded |
+| `steamdeck-verified.pdf` | The Steam Deck Verified categories |
+| `steamdeck-compat-review.pdf` | How Valve reviews a game for Deck compatibility |
+| `proton-readme.pdf` | What Proton is and what it can run |
+| `protondb-performance.pdf` | ProtonDB performance reports |
+| `protondb-site-questions.pdf` | ProtonDB's own site and FAQ |
+| `protondb-troubleshooting.pdf` | Common Proton problems and fixes |
+
+The filenames are what the agent cites, so keeping them is what makes a citation
+mean anything. Note what is deliberately absent: nothing here defines ProtonDB's
+Platinum through Borked tiers, because ProtonDB does not publish them. That gap
+is the reason the relevance floor exists.
 
 The PDFs need to contain actual text rather than just scanned images, otherwise there is nothing for the ingestion script to extract and embed.
 
