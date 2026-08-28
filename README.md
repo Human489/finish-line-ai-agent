@@ -166,7 +166,9 @@ The problem is that Steam Deck Verified is a completely different rating system,
 
 Without a sufficiently strict threshold, the agent can use the wrong document and produce a convincing but incorrect explanation.
 
-I tested the threshold against the corpus rather than just picking an arbitrary value. The floor is 0.75. Genuine matches in this corpus score between 0.83 and 0.89, a complete miss sits at around 0.58, and the Borked question peaks at about 0.74. That is why the 0.62 I started with was not strict enough.
+I tested the threshold against the corpus rather than just picking an arbitrary value. The floor is 0.75. A complete miss sits at around 0.58, and the Borked question peaks at about 0.74, which is why the 0.62 I started with was not strict enough.
+
+Genuine matches mostly land between 0.81 and 0.87, but not all of them. "How is playtime recorded if I play offline?" is a real question the documents do answer, and it scores 0.7512, clearing the floor by roughly a thousandth. The margin between answering correctly and refusing wrongly is that thin, and it is luck rather than design.
 
 Document ingestion is also separate from the agent itself. The agent only reads from the finished vector index.
 

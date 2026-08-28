@@ -123,7 +123,9 @@ The Steam tools answer *what is in this library*. A corpus of 12 Valve and Proto
 
 #### The relevance floor is the whole feature
 
-`RELEVANCE_FLOOR = 0.75`, measured against this corpus rather than inherited from the 0.62 the brief suggested. Real hits land 0.83–0.89; a total miss sits at 0.58 (`bge` has a high similarity floor, so 0.58 is effectively zero, not "half relevant").
+`RELEVANCE_FLOOR = 0.75`, measured against this corpus rather than inherited from the 0.62 the brief suggested. A total miss sits at 0.58 (`bge` has a high similarity floor, so 0.58 is effectively zero, not "half relevant").
+
+**Do not quote a comfortable range for real hits.** Most land 0.81–0.87, but the offline-playtime question is a genuine hit at **0.7512** — it clears the floor by 0.0012. Re-measure before repeating any range here; the numbers moved when the corpus was re-ingested at 200 words, and they moved *down* for that question. `rag.ts` carries the current measurements.
 
 The number matters because of one case: **"what does the Borked rating mean?" retrieves Valve's Steam Deck compatibility docs at 0.64–0.74** — a different rating system from ProtonDB's, and nothing in the corpus defines ProtonDB's tiers because ProtonDB does not publish them. At 0.62 the agent answered it confidently and wrongly.
 

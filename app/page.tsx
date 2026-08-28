@@ -803,10 +803,12 @@ function SourceCitation({ sources }: { sources: string[] }) {
  *
  * The score matters as much as the passage. A retrieved chunk is not evidence
  * on its own — the whole reason this agent can answer "why is a game missing"
- * but refuses "what does Borked mean" is that one scores 0.89 and the other
- * 0.64, and the second is a near-miss from a document about a different rating
- * system entirely. Showing the number and the filename is what lets a person
- * check that for themselves instead of taking the answer on trust.
+ * but refuses "what does Borked mean" is that one scores about 0.86 and the
+ * other about 0.68, and the second is a near-miss from a document about a
+ * different rating system entirely. Showing the number and the filename is
+ * what lets a person check that for themselves instead of taking the answer on
+ * trust. The gap is narrower than it looks: a genuine hit in this corpus can
+ * score 0.7512, so the displayed number is doing real work.
  */
 function DocumentMatches({ part }: { part: DynamicToolPart }) {
   const output = part.output as DocumentSearchOutput | undefined;
@@ -1242,16 +1244,27 @@ export default function Home() {
 
                 // Checked against the text the reader can actually see, which
                 // excludes the interim narration dropped above.
-                const visibleAnswer = parts
+                const renderedTexts = parts
                   .filter(
                     (part, index): part is { type: "text"; text: string } =>
                       part.type === "text" && index > finalTextFrom,
                   )
-                  .map((part) => part.text)
-                  .join(" ");
+                  .map((part) => part.text);
+
+                // GroundedText replaces a part whose numbers do not check out
+                // with score_backlog's deterministic sentence. That sentence is
+                // about which game to play, so a source line under it would
+                // credit a document the displayed text never used. Evaluated
+                // per part, exactly as GroundedText does it, so the two agree.
+                const quotable = scoreOutput?.scored.map(quotableMetrics);
+                const groundingWillReplace = quotable
+                  ? renderedTexts.some((text) => findUngroundedNumbers(text, quotable).length > 0)
+                  : false;
 
                 const missingCitations =
-                  isBusy && isLastMessage ? [] : citationsToShow(visibleAnswer, answeredFrom);
+                  (isBusy && isLastMessage) || groundingWillReplace
+                    ? []
+                    : citationsToShow(renderedTexts.join(" "), answeredFrom);
 
                 return (
                   <Message key={message.id} from={message.role}>

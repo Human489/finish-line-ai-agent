@@ -29,6 +29,50 @@ export class SteamKeyMissingError extends Error {
   }
 }
 
+/**
+ * The key exists but Steam refused it: revoked, expired or malformed.
+ *
+ * Typed rather than a bare Error so callers can classify it without matching
+ * on message text. The message names no environment variable: this reaches an
+ * unauthenticated HTTP route, and a stranger has no business learning the
+ * server's configuration from an error. The operator finds the cause in the
+ * server logs, where the status code is already recorded.
+ */
+export class SteamKeyRejectedError extends Error {
+  constructor() {
+    super("Steam refused this server's API key.");
+  }
+}
+
+/**
+ * Steam answered, but not with an answer: a 5xx, a gateway error, an outage.
+ *
+ * Typed separately from the two key errors and from the private-library case
+ * because all three used to collapse into one visitor-facing sentence, and the
+ * advice for each is different. Telling someone to check their privacy
+ * settings during a Steam outage sends them to fix something that is not
+ * broken.
+ */
+export class SteamUnavailableError extends Error {
+  constructor(status: number) {
+    super(`Steam returned HTTP ${status}.`);
+  }
+}
+
+/** Public profile, private game details - the one case that IS the visitor's to fix. */
+export class SteamLibraryPrivateError extends Error {
+  constructor() {
+    super("Steam returned no games list for this profile.");
+  }
+}
+
+/** No such vanity name or SteamID64. Safe to repeat back to whoever asked. */
+export class SteamProfileNotFoundError extends Error {
+  constructor(readonly input: string) {
+    super(`No Steam profile found for "${input}".`);
+  }
+}
+
 function apiKey(): string {
   const key = process.env.STEAM_WEB_API_KEY;
   if (!key) throw new SteamKeyMissingError();
@@ -79,16 +123,14 @@ export async function resolveSteamId(
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`Steam profile lookup failed (HTTP ${response.status}).`);
+    throw new SteamUnavailableError(response.status);
   }
 
   const xml = await response.text();
   const steamId = xml.match(/<steamID64>(\d+)<\/steamID64>/)?.[1];
 
   if (!steamId) {
-    throw new Error(
-      `No Steam profile found for "${input}". Check the vanity name or SteamID64.`,
-    );
+    throw new SteamProfileNotFoundError(input);
   }
 
   return {
@@ -109,10 +151,10 @@ export async function getOwnedGames(steamId: string): Promise<OwnedGame[]> {
   const response = await keyedFetch(url);
 
   if (response.status === 401 || response.status === 403) {
-    throw new Error("Steam rejected the API key. Check STEAM_WEB_API_KEY.");
+    throw new SteamKeyRejectedError();
   }
   if (!response.ok) {
-    throw new Error(`GetOwnedGames failed (HTTP ${response.status}).`);
+    throw new SteamUnavailableError(response.status);
   }
 
   const body = (await response.json()) as {
@@ -121,9 +163,7 @@ export async function getOwnedGames(steamId: string): Promise<OwnedGame[]> {
 
   const games = body.response?.games;
   if (!games) {
-    throw new Error(
-      "Steam returned no games. The profile's game details are probably set to private.",
-    );
+    throw new SteamLibraryPrivateError();
   }
 
   return games.map((game) => ({

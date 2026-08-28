@@ -30,12 +30,18 @@ const REQUEST_TIMEOUT_MS = 10_000;
 /**
  * Below this, treat the whole result as "nothing relevant" and say so.
  *
- * Measured against this corpus rather than inherited:
+ * Measured against this corpus rather than inherited. Current index, which is
+ * the 200-word re-ingest (see the block below for what moved and why):
  *
- *   0.8877  "why is a game missing from my Steam library?"  - true hit
- *   0.7293  secondary chunks on that same question         - still relevant
- *   0.6423  "what does the Borked rating mean?"            - NEAR MISS
+ *   0.8646  "why is a game missing from my Steam library?"  - true hit
+ *   0.7592  secondary chunks on that same question         - still relevant
+ *   0.6790  "what does the Borked rating mean?"            - NEAR MISS
  *   0.5781  "what is the best build in Elden Ring?"        - unrelated
+ *
+ * Do not treat these as fixed. They shifted when the corpus was re-ingested,
+ * and the Borked figure in particular depends on how the model rephrased the
+ * question: 0.6423 by hand, 0.6790 and 0.7375 through the agent on different
+ * runs. Re-measure rather than trusting a number copied from here.
  *
  * The 0.64 case is why the number is not lower. Nothing in the corpus defines
  * ProtonDB's tiers — ProtonDB does not publish them — so that query matches
@@ -56,7 +62,9 @@ export const RELEVANCE_FLOOR = 0.75;
  * a long way. "What does the Borked rating mean?" scored 0.6423 by hand,
  * then 0.7026 and 0.7375 through the agent.
  *
- * The uncomfortable part is that the two populations OVERLAP:
+ * The uncomfortable part is that the two populations OVERLAP. These four are
+ * the ORIGINAL 500-word-chunk measurements, superseded below and kept only
+ * because the before-and-after comparison is the whole point:
  *
  *   0.7375  "what does the Borked rating mean?"        - near miss, must refuse
  *   0.7537  "how is playtime recorded if I play offline?" - real hit, must answer
@@ -66,12 +74,19 @@ export const RELEVANCE_FLOOR = 0.75;
  * 0.75 is the only value that gets all four right, and it clears each by about
  * 0.012. That is not a comfortable margin, and it is luck rather than design.
  *
- * The real fix is not a better threshold, it is better retrieval: the offline
- * question scores low because its answer sits inside a 500-word chunk full of
- * other material, so the signal is diluted. Re-ingesting with smaller chunks
- * (CHUNK_WORDS=200) should lift genuine hits and leave the near-miss where it
- * is, separating the populations properly. A reranker would do the same job
- * more thoroughly.
+ * The corpus has since been re-ingested at CHUNK_WORDS=200, which is what the
+ * live index holds — measured, every returned chunk is 200 words apart from the
+ * tail of a document. It did NOT separate the populations. Re-measured against
+ * the current index:
+ *
+ *   0.7512  "how is playtime recorded if I play offline?" - real hit
+ *   0.8179  "what does Steam Families let me do?"      - real hit
+ *   0.8646  "why is a game missing from my library?"   - real hit
+ *
+ * So the offline question got slightly WORSE, and now clears the floor by
+ * 0.0012 rather than 0.0037. Smaller chunks were the wrong lever: that answer
+ * is diffuse across the document rather than buried in one oversized chunk.
+ * A reranker (retrieve 20, narrow to 5) is the remaining option.
  *
  * Until then, err upward when in doubt: a needless refusal costs the player a
  * retry, a near-miss answer costs them a confident falsehood.

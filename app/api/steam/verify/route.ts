@@ -1,9 +1,71 @@
 import { NextResponse } from "next/server";
 import {
   SteamKeyMissingError,
+  SteamKeyRejectedError,
+  SteamLibraryPrivateError,
+  SteamProfileNotFoundError,
+  SteamUnavailableError,
   getOwnedGames,
   resolveSteamId,
 } from "@/agent/lib/steam";
+
+/**
+ * What to tell the visitor, decided by error TYPE rather than by forwarding the
+ * thrown text.
+ *
+ * This route is unauthenticated, so the thrown message is the wrong thing to
+ * send: it is written for whoever runs the server, and the missing-key error
+ * names STEAM_WEB_API_KEY and links to where to get one. Forwarding it handed a
+ * stranger the name of a server secret, the same mistake the document search
+ * error made.
+ *
+ * Each branch also has to be ACCURATE, not merely vague. Collapsing these into
+ * one sentence about privacy settings told people to fix a setting that was
+ * fine whenever Steam simply had an outage, and told them to retry a missing
+ * key that no amount of retrying will fix.
+ */
+function visitorMessage(error: unknown): { text: string; status: number; ourFault: boolean } {
+  if (error instanceof SteamKeyMissingError || error instanceof SteamKeyRejectedError) {
+    return {
+      text: "This app is not able to talk to Steam at the moment. That is a problem with the app rather than your profile, and retrying will not help until it is fixed.",
+      status: 500,
+      ourFault: true,
+    };
+  }
+
+  if (error instanceof SteamUnavailableError) {
+    return {
+      text: "Steam did not respond properly just now. Nothing is wrong with your profile, so it is worth trying again in a moment.",
+      status: 503,
+      ourFault: false,
+    };
+  }
+
+  if (error instanceof SteamLibraryPrivateError) {
+    return {
+      text: "Steam would not share this profile's games. Set Game Details to Public in Steam privacy settings, which is a separate setting from the profile itself.",
+      status: 403,
+      ourFault: false,
+    };
+  }
+
+  if (error instanceof SteamProfileNotFoundError) {
+    return {
+      text: "No Steam profile found with that name. Check the vanity name, profile URL or 17-digit SteamID64.",
+      status: 404,
+      ourFault: false,
+    };
+  }
+
+  // NOT dead code, despite every throw in steam.ts being typed: fetch itself
+  // rejects on a network failure, and AbortSignal.timeout rejects with a
+  // TimeoutError. Both land here, and both are worth retrying.
+  return {
+    text: "Could not reach Steam to check that profile. Please try again in a moment.",
+    status: 503,
+    ourFault: false,
+  };
+}
 
 /**
  * Validates a Steam profile before the user is allowed to start a conversation.
@@ -110,16 +172,9 @@ export async function POST(request: Request) {
   try {
     resolved = await resolveSteamId(profile);
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not reach Steam to look up that profile.",
-      },
-      { status: 404 },
-    );
+    const { text, status } = visitorMessage(error);
+    console.error("[steam/verify] profile lookup failed", error);
+    return NextResponse.json({ ok: false, error: text }, { status });
   }
 
   if (resolved.privacyState !== "public") {
@@ -141,19 +196,14 @@ export async function POST(request: Request) {
       playedGames: played,
     });
   } catch (error) {
-    const isKeyProblem = error instanceof SteamKeyMissingError;
+    const { text, status, ourFault } = visitorMessage(error);
+
+    // The operator gets the real error here; the visitor never does.
+    console.error("[steam/verify] library lookup failed", error);
 
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Steam refused to return the library for that profile.",
-        // A missing server key is the operator's problem, not the visitor's.
-        keyMissing: isKeyProblem,
-      },
-      { status: isKeyProblem ? 500 : 403 },
+      { ok: false, error: text, serverProblem: ourFault },
+      { status },
     );
   }
 }
