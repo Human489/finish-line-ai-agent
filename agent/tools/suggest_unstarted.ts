@@ -60,6 +60,9 @@ export default defineTool({
 
     const wanted = genre.trim().toLowerCase();
     const matches: { appid: number; name: string; genres: string[] }[] = [];
+    // Every genre Steam actually returned while scanning. This is what makes
+    // "nothing matched" and "Steam does not have that genre" different answers.
+    const seen = new Set<string>();
     let failedLookups = 0;
     let checked = 0;
 
@@ -87,6 +90,7 @@ export default defineTool({
           failedLookups += 1;
           return;
         }
+        result.value.genres.forEach((g) => seen.add(g));
         if (result.value.genres.some((g) => g.toLowerCase().includes(wanted))) {
           matches.push({
             appid: batch[index].appid,
@@ -102,16 +106,31 @@ export default defineTool({
     // Say what was actually looked at. "None of your games are horror" and "none
     // of the 40 I checked are horror" are different statements, and only the
     // second one is true.
+    // Steam's appdetails genres are a short, coarse list: Action, Adventure,
+    // Indie, RPG, Strategy, Simulation, Casual and a few more. Moods people
+    // actually ask for are TAGS, not genres, and tags are not on this endpoint.
+    // Every canonical horror game checked - Phasmophobia, Outlast, Amnesia,
+    // Resident Evil 2, Dead by Daylight - returns only Action/Adventure/Indie.
+    // So "no horror games" was never true; "Steam does not tell me which ones
+    // are horror" is. Those are different sentences and the player deserves the
+    // second one.
+    const genreExists = [...seen].some((g) => g.toLowerCase().includes(wanted));
+    const available = [...seen].sort();
+
     return {
       totalUnstarted: unstarted.length,
       genre,
       checked,
       failedLookups,
+      genreExists,
+      availableGenres: available,
       games: matches.slice(0, limit),
       note:
         matches.length > 0
           ? `Genres are Steam's own. Found ${matches.length} matching "${genre}" within the first ${checked} of ${unstarted.length} unstarted games. Pass appids to score_backlog before recommending one.`
-          : `Checked ${checked} of ${unstarted.length} unstarted games and none listed "${genre}" as a Steam genre. Say you looked at ${checked} of them rather than implying the whole library was searched, and offer a different genre.`,
+          : genreExists
+            ? `Checked ${checked} of ${unstarted.length} unstarted games and none listed "${genre}". Say you looked at ${checked} of them rather than implying the whole library was searched.`
+            : `Steam does not publish "${genre}" as a genre, so this cannot be answered from genre data at all — it is a community tag, and tags are not available here. Do NOT say the player owns no ${genre} games, because that is not what was checked. Tell them Steam's genre data does not cover ${genre}, and offer the genres it does cover for these games: ${available.join(", ")}.`,
     };
   },
 });

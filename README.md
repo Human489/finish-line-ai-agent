@@ -37,7 +37,7 @@ If HowLongToBeat has no useful data for a game, Steam fails to return something,
 | "What should I finish?"                                      | Checks achievement progress across played games, scores the best candidates and recommends one |
 | "What can I beat this weekend? I only care about the story." | Uses story-progress scoring instead of achievement completion                                  |
 | "What should I play next?"                                   | Looks at games you own but have never launched                                                 |
-| "Give me something horror-ish I haven't started."            | Checks the actual Steam genres of unplayed games                                               |
+| "Give me something horror-ish I haven't started."            | Checks real Steam genres, and says so when Steam has no genre for what you asked               |
 | "Something well-reviewed and short."                         | Combines Steam review scores with completion-time estimates                                    |
 | "How far through Hollow Knight am I?"                        | Scores just Hollow Knight instead of searching the whole library                               |
 | "Does Sifu work on Linux?"                                   | Returns its ProtonDB compatibility tier                                                        |
