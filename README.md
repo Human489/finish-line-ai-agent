@@ -142,7 +142,7 @@ For those questions, the project has a small reference corpus made from twelve V
 
 This is handled using retrieval-augmented generation (RAG).
 
-Each document is split into chunks of roughly 200 words. An embedding model converts each chunk into a vector containing 768 numbers representing its meaning, which are stored in a vector index.
+Each document is split into chunks of 200 words, overlapping by 40 so a sentence is not cut in half at a boundary. An embedding model converts each chunk into a vector containing 768 numbers representing its meaning, which are stored in a vector index.
 
 When the user asks a documentation-related question, the question is embedded in the same way and compared against the stored chunks. The most similar chunks are returned and included in the model's context.
 
@@ -186,6 +186,10 @@ Both variables matter. The skeleton defaults to 500-word chunks with 50 words of
 overlap, so leaving them out builds a different index from this one and the
 relevance scores move with it. The 0.75 floor in `agent/lib/rag.ts` was measured
 against a 200-word index.
+
+Both numbers are checkable rather than remembered. Every chunk the index returns
+is 200 words, apart from the tail of a document, and adjacent chunks from the
+same file share exactly 40 words at the boundary.
 
 The corpus I used contains twelve pages of Valve and ProtonDB documentation saved as PDFs. They are not committed here because they are not mine to redistribute.
 
