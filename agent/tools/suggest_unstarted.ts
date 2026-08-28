@@ -3,8 +3,10 @@ import { z } from "zod";
 import { cacheFor, pooledSettled } from "../lib/cache";
 import { getGameDetails, getOwnedGames, type GameDetails, type OwnedGame } from "../lib/steam";
 
-/** How many unstarted games to check genres for when a genre is asked for. */
-const GENRE_SEARCH_WIDTH = 40;
+/** Genres are checked in batches, stopping as soon as enough games match. */
+const GENRE_BATCH = 40;
+/** Hard ceiling on how many games one genre question may look up. */
+const GENRE_MAX_SCAN = 200;
 
 /**
  * Never-started games cost nothing to surface: zero playtime means zero
@@ -56,33 +58,46 @@ export default defineTool({
     cache.details ??= new Map();
     const details = cache.details as Map<number, GameDetails>;
 
-    const pool = unstarted.slice(0, GENRE_SEARCH_WIDTH);
-    const settled = await pooledSettled(pool, 8, async (game) => {
-      const known = details.get(game.appid);
-      if (known) return known;
-      const fetched = await getGameDetails(game.appid);
-      details.set(game.appid, fetched);
-      return fetched;
-    });
-
     const wanted = genre.trim().toLowerCase();
     const matches: { appid: number; name: string; genres: string[] }[] = [];
     let failedLookups = 0;
+    let checked = 0;
 
-    settled.forEach((result, index) => {
-      if (result.status !== "fulfilled") {
-        failedLookups += 1;
-        return;
-      }
-      const hit = result.value.genres.some((g) => g.toLowerCase().includes(wanted));
-      if (hit) {
-        matches.push({
-          appid: pool[index].appid,
-          name: pool[index].name,
-          genres: result.value.genres,
-        });
-      }
-    });
+    // Scan in batches and stop as soon as there are enough matches. A single
+    // 40-game window found nothing on a 4,500-game library, which is a sampling
+    // problem rather than a genre problem: the order Steam returns is arbitrary,
+    // so a narrow window says more about the window than the library. Common
+    // genres now terminate in the first batch; rare ones keep looking, bounded
+    // so a genre nobody owns cannot walk an entire library.
+    const ceiling = Math.min(unstarted.length, GENRE_MAX_SCAN);
+    while (checked < ceiling && matches.length < limit) {
+      const batch = unstarted.slice(checked, Math.min(checked + GENRE_BATCH, ceiling));
+      if (batch.length === 0) break;
+
+      const settled = await pooledSettled(batch, 8, async (game) => {
+        const known = details.get(game.appid);
+        if (known) return known;
+        const fetched = await getGameDetails(game.appid);
+        details.set(game.appid, fetched);
+        return fetched;
+      });
+
+      settled.forEach((result, index) => {
+        if (result.status !== "fulfilled") {
+          failedLookups += 1;
+          return;
+        }
+        if (result.value.genres.some((g) => g.toLowerCase().includes(wanted))) {
+          matches.push({
+            appid: batch[index].appid,
+            name: batch[index].name,
+            genres: result.value.genres,
+          });
+        }
+      });
+
+      checked += batch.length;
+    }
 
     // Say what was actually looked at. "None of your games are horror" and "none
     // of the 40 I checked are horror" are different statements, and only the
@@ -90,13 +105,13 @@ export default defineTool({
     return {
       totalUnstarted: unstarted.length,
       genre,
-      checked: pool.length,
+      checked,
       failedLookups,
       games: matches.slice(0, limit),
       note:
         matches.length > 0
-          ? `Genres are Steam's own. Checked ${pool.length} of ${unstarted.length} unstarted games and ${matches.length} matched "${genre}". Pass appids to score_backlog before recommending one.`
-          : `Checked ${pool.length} of ${unstarted.length} unstarted games and none listed "${genre}" as a Steam genre. Say you looked at ${pool.length} of them rather than implying the whole library was searched, and offer to look at more or at a different genre.`,
+          ? `Genres are Steam's own. Found ${matches.length} matching "${genre}" within the first ${checked} of ${unstarted.length} unstarted games. Pass appids to score_backlog before recommending one.`
+          : `Checked ${checked} of ${unstarted.length} unstarted games and none listed "${genre}" as a Steam genre. Say you looked at ${checked} of them rather than implying the whole library was searched, and offer a different genre.`,
     };
   },
 });

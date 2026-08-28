@@ -783,6 +783,42 @@ type DocumentSearchOutput = {
 };
 
 /**
+ * One collapsible line standing in for the turn's plumbing.
+ *
+ * A genre question can legitimately take four or five calls, and rendering each
+ * one put a stack of "resolve_steam_profile / suggest_unstarted / Completed"
+ * above the sentence the player actually asked for. The calls still matter -
+ * they are how you check the answer came from data - so they are one click away
+ * rather than gone.
+ *
+ * A sweep still renders on its own while it is running: it is the one tool with
+ * live progress worth watching, and hiding it would make a slow first turn look
+ * like a hung one.
+ */
+function ToolCallSummary({ parts }: { parts: DynamicToolPart[] }) {
+  if (parts.length === 0) return null;
+
+  const names = [...new Set(parts.map((part) => part.toolName))];
+  const pending = parts.filter((part) => part.state !== "output-available").length;
+
+  return (
+    <details className="group rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none list-none">
+        <span className="group-open:hidden">Show </span>
+        {parts.length} {parts.length === 1 ? "step" : "steps"}
+        {pending > 0 ? ` (${pending} running)` : ""}
+        <span className="opacity-60"> · {names.join(", ")}</span>
+      </summary>
+      <div className="mt-3 space-y-2">
+        {parts.map((part) => (
+          <ToolCall key={part.toolCallId} part={part} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/**
  * The source line under a document-grounded answer.
  *
  * Rendered from the tool output, so it appears whether or not the model
@@ -1261,6 +1297,22 @@ export default function Home() {
                   ? renderedTexts.some((text) => findUngroundedNumbers(text, quotable).length > 0)
                   : false;
 
+                // Everything that would otherwise render as a bare tool card.
+                // score_backlog and search_documents have their own displays and
+                // are the answer itself, so they are never folded away.
+                const plumbing = parts.filter((part): part is DynamicToolPart => {
+                  if (part.type !== "dynamic-tool") return false;
+                  if (part.toolMetadata?.eve?.inputRequest) return false;
+                  return part.toolName !== "score_backlog" && part.toolName !== "search_documents";
+                });
+
+                const isLiveSweep = (part: DynamicToolPart) =>
+                  part.toolName === "sweep_achievements" &&
+                  (part.output as SweepSnapshot | undefined)?.phase === "sweeping";
+
+                const folded = plumbing.filter((part) => !isLiveSweep(part));
+                const foldedAt = folded[0]?.toolCallId;
+
                 const missingCitations =
                   (isBusy && isLastMessage) || groundingWillReplace
                     ? []
@@ -1314,7 +1366,15 @@ export default function Home() {
                           if (part.toolName === "search_documents") {
                             return <DocumentMatches key={part.toolCallId} part={part} />;
                           }
-                          return <ToolCall key={part.toolCallId} part={part} />;
+                          // A running sweep keeps its own card; everything else
+                          // collapses into one line at the first folded call.
+                          if (isLiveSweep(part)) {
+                            return <ToolCall key={part.toolCallId} part={part} />;
+                          }
+                          if (part.toolCallId === foldedAt) {
+                            return <ToolCallSummary key={part.toolCallId} parts={folded} />;
+                          }
+                          return null;
                         }
 
                         return null;

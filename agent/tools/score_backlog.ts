@@ -32,7 +32,11 @@ import {
 // recommendation — the extra fifteen are scrolling, not information. It also
 // halves the per-turn enrichment: score_backlog is the only tool that hits
 // HowLongToBeat, one request per game.
-const MAX_GAMES = 10;
+// Five, not ten. Every scored game renders a card, and ten cards is a wall the
+// player has to scroll past to reach the one sentence that answers them. The
+// answer names ONE game, so the shortlist only has to be long enough to choose
+// from. It also halves the payload the model reads back.
+const MAX_GAMES = 5;
 const CONCURRENCY = 5;
 
 export default defineTool({

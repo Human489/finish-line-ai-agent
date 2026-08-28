@@ -245,4 +245,4 @@ Category badge colours need a per-theme pair (`text-x-700 dark:text-x-400`). `bg
 
 `gemini-3.5-flash-lite` with `reasoning: "low"`. `gemini-2.5-flash` is closed to new keys; `gemini-3.6-flash` works but free-tier keys get 20 requests/day, which one conversation exhausts. `scripts/smoke-keys.ts` lists what the current key can reach.
 
-Every tool call is a model request. Prefer batching through `score_backlog` (handles up to 10 games in one call) over per-game tools.
+Every tool call is a model request. Prefer batching through `score_backlog` (handles up to 5 games in one call) over per-game tools.
