@@ -798,10 +798,15 @@ function DocumentMatches({ part }: { part: DynamicToolPart }) {
     return <Shimmer className="text-sm text-muted-foreground">Searching the documents…</Shimmer>;
   }
 
+  // The reason is deliberately not shown. `output.error` carries diagnostic
+  // detail — a missing-variable message names CF_ACCOUNT_ID and friends — and
+  // the tool's own model instruction is to report the failure "without naming
+  // the machinery". Rendering it here undid that one component over. The
+  // detail stays in the tool output for anyone inspecting the transcript.
   if (output.error) {
     return (
       <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-        Document search unavailable — {output.error}
+        Document search unavailable.
       </p>
     );
   }
