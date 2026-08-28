@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { pooledSettled } from "../agent/lib/cache";
+import { citationsToShow } from "../agent/lib/citations";
 import { isCapacityError, withModelFallback } from "../agent/lib/model-fallback";
 import { CATEGORY_LABELS, THRESHOLDS, type Category } from "../agent/lib/categories";
 import type { AchievementProgress } from "../agent/lib/steam";
@@ -730,6 +731,59 @@ async function main() {
     );
     assert.notEqual(under, "long-haul");
     assert.equal(over, "long-haul");
+  });
+
+  // --- citations ----------------------------------------------------------
+  //
+  // A missing citation is not a false statement, so unlike an ungrounded
+  // number it is appended rather than used to discard the sentence. What
+  // matters is that a correctly cited answer gets no duplicate line, since
+  // that is the case a naive "always append" would get wrong.
+
+  const docs = ["steam-missing-games.pdf", "steam-families.pdf"];
+
+  const alreadyCited: string[] = [
+    "Games go missing for a few reasons (source: steam-missing-games.pdf).",
+    "See steam-families.pdf for what is shared.",
+    // The stem alone counts: the model writes it both ways.
+    "Per steam-missing-games, a pending purchase can hide a game.",
+    // Case is not the model's strong suit either.
+    "Source: STEAM-FAMILIES.PDF",
+    // Citing only one of the two retrieved sources is enough. A good answer
+    // often rests on one document even when the search returned two.
+    "Filters can hide games (source: steam-missing-games.pdf).",
+  ];
+
+  for (const answer of alreadyCited) {
+    await test(`cited already: ${answer.slice(0, 46)}`, () => {
+      assert.deepEqual(citationsToShow(answer, docs), []);
+    });
+  }
+
+  const needsCitation: string[] = [
+    "Games can be missing if your library filters are set incorrectly.",
+    // Prose ABOUT a source is not a citation of one: a reader cannot trace it.
+    "According to the Steam Families documentation, shared games can be locked.",
+    // A different filename is not this answer's source.
+    "As covered in proton-compatibility.pdf, some titles will not launch.",
+  ];
+
+  for (const answer of needsCitation) {
+    await test(`needs citation: ${answer.slice(0, 46)}`, () => {
+      assert.deepEqual(citationsToShow(answer, docs), docs);
+    });
+  }
+
+  await test("citations: duplicate sources collapse to one line", () => {
+    assert.deepEqual(citationsToShow("No attribution here.", [...docs, docs[0]]), docs);
+  });
+
+  await test("citations: nothing retrieved means nothing to cite", () => {
+    assert.deepEqual(citationsToShow("I don't know what the Borked rating means.", []), []);
+  });
+
+  await test("citations: an empty answer is the fallback path's problem", () => {
+    assert.deepEqual(citationsToShow("   ", docs), []);
   });
 
   console.log(

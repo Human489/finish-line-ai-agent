@@ -8,6 +8,7 @@ import {
   CATEGORY_DESCRIPTIONS,
   type Category,
 } from "@/agent/lib/categories";
+import { citationsToShow } from "@/agent/lib/citations";
 import { findUngroundedNumbers, quotableMetrics, type ScoredGame } from "@/agent/lib/scoring";
 import {
   Conversation,
@@ -782,6 +783,22 @@ type DocumentSearchOutput = {
 };
 
 /**
+ * The source line under a document-grounded answer.
+ *
+ * Rendered from the tool output, so it appears whether or not the model
+ * remembered to cite. It only appears when the answer named no source itself,
+ * so a correctly attributed answer is not followed by a duplicate line.
+ */
+function SourceCitation({ sources }: { sources: string[] }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      {sources.length === 1 ? "Source: " : "Sources: "}
+      {sources.join(", ")}
+    </p>
+  );
+}
+
+/**
  * What the document search actually retrieved, shown rather than described.
  *
  * The score matters as much as the passage. A retrieved chunk is not evidence
@@ -1210,6 +1227,32 @@ export default function Home() {
 
                 const fallbackOutput = showFallback ? scoreOutput : undefined;
 
+                // Every source this turn actually answered from. Searches that
+                // found nothing, or errored, are excluded: there is nothing to
+                // cite for a refusal, and citing the near-miss the floor just
+                // rejected would be worse than citing nothing.
+                const answeredFrom = parts.flatMap((part) => {
+                  if (part.type !== "dynamic-tool") return [];
+                  if (part.toolName !== "search_documents") return [];
+                  if (part.state !== "output-available") return [];
+                  const output = part.output as DocumentSearchOutput | undefined;
+                  if (!output || output.error || output.nothingRelevant) return [];
+                  return output.matches.map((match) => match.source);
+                });
+
+                // Checked against the text the reader can actually see, which
+                // excludes the interim narration dropped above.
+                const visibleAnswer = parts
+                  .filter(
+                    (part, index): part is { type: "text"; text: string } =>
+                      part.type === "text" && index > finalTextFrom,
+                  )
+                  .map((part) => part.text)
+                  .join(" ");
+
+                const missingCitations =
+                  isBusy && isLastMessage ? [] : citationsToShow(visibleAnswer, answeredFrom);
+
                 return (
                   <Message key={message.id} from={message.role}>
                     <MessageContent>
@@ -1265,6 +1308,9 @@ export default function Home() {
                       })}
                       {isComposing && (
                         <Shimmer className="text-sm">Working out the answer…</Shimmer>
+                      )}
+                      {missingCitations.length > 0 && (
+                        <SourceCitation sources={missingCitations} />
                       )}
                       {fallbackOutput && <FallbackAnswer output={fallbackOutput} />}
                     </MessageContent>
