@@ -179,8 +179,13 @@ Ingestion is handled separately using [gai-rag-skeleton](https://github.com/Hama
 To rebuild it, put the PDFs in that repo's `corpus/` folder and run:
 
 ```bash
-npm run ingest
+CHUNK_WORDS=200 OVERLAP_WORDS=40 npm run ingest
 ```
+
+Both variables matter. The skeleton defaults to 500-word chunks with 50 words of
+overlap, so leaving them out builds a different index from this one and the
+relevance scores move with it. The 0.75 floor in `agent/lib/rag.ts` was measured
+against a 200-word index.
 
 The corpus I used contains twelve pages of Valve and ProtonDB documentation saved as PDFs. They are not committed here because they are not mine to redistribute.
 
