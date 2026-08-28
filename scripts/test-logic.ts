@@ -292,6 +292,38 @@ async function main() {
     }
   });
 
+  await test("templateReason names the game", () => {
+    const scored = scoreGame(
+      { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
+      "completionist",
+    );
+    // Without this the sentence was a verdict and some figures attached to no
+    // game, which is what a player actually saw when the model's prose was
+    // rejected on a "what should I finish" question.
+    assert.ok(
+      templateReason(scored).startsWith(`${scored.name}:`),
+      `no game name in: ${templateReason(scored)}`,
+    );
+  });
+
+  await test("a numeric game title does not trip the grounding checker", () => {
+    // The name is now part of templateReason's output, and titles are full of
+    // bare digits. findUngroundedNumbers ignores digits without units for
+    // exactly this reason; this pins it, since a regression here would discard
+    // the replacement sentence and leave the player with nothing.
+    for (const name of ["Portal 2", "Left 4 Dead 2", "Half-Life 2: Episode One", "7 Days to Die"]) {
+      const scored = scoreGame(
+        { ...base, name, achievements: achievements(), playtime: playtime(), rarity: RARE },
+        "completionist",
+      );
+      assert.deepEqual(
+        findUngroundedNumbers(templateReason(scored), scored.metrics),
+        [],
+        `title "${name}" tripped the checker: ${templateReason(scored)}`,
+      );
+    }
+  });
+
   // --- suppressed figures must not be quotable ----------------------------
   // Regression, found by running a real profile through the agent: the guard
   // was checking prose against the FULL metrics, so "Sifu needs about 1.1

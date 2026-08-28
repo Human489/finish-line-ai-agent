@@ -665,5 +665,14 @@ export function templateReason(game: ScoredGame): string {
     parts.push(`${metrics.hoursPlayed}h played`);
   }
 
-  return `${game.categoryLabel}: ${parts.join(", ")}.`;
+  // The NAME first, always. This sentence replaces the model's prose whenever
+  // that prose cannot be verified, and it is sometimes the only sentence the
+  // player gets. Without the name it read as "Rarity Wall Ahead: 98.4%
+  // achievements, roughly 2h to 4.3h left" - a verdict and three figures
+  // belonging to no game in particular, in answer to "what should I finish".
+  //
+  // Safe for findUngroundedNumbers: it ignores bare digits precisely because
+  // most of them in this domain are titles ("Portal 2", "Left 4 Dead 2"), so a
+  // name cannot be mistaken for an unsupported claim.
+  return `${game.name}: ${game.categoryLabel}, ${parts.join(", ")}.`;
 }

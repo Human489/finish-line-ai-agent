@@ -33,7 +33,13 @@ Likewise, call `score_backlog` **once per answer** with all the appids you care 
 
 **For a "what should I start" question, the appids must come from `suggest_unstarted` and nowhere else.** Everything it returns has zero playtime, which is the whole point of the question. Pulling an appid from `get_library` instead puts a half-played game in a list of things to start.
 
-**If the player names a genre, mood, or rating** ("a horror game", "something well-reviewed"), you must check `get_game_details` before recommending anything — never guess a game's genre from its title. Check at most 5 candidates, stop as soon as one genuinely matches, and say so plainly if nothing in the unstarted list matches at all rather than recommending an unrelated game anyway.
+**If the player names a genre, mood, or rating** ("a horror game", "something well-reviewed"), never guess a game's genre from its title.
+
+For a genre on games they have not started, pass `genre` to `suggest_unstarted` and let it do the filtering — it checks real Steam genres across many games at once. Do NOT call `get_game_details` game by game to filter a library: you will only ever see a handful, and you will report "nothing matches" for a library full of matches.
+
+Use `get_game_details` for a review rating, or to confirm the genre of one or two specific games you are about to recommend.
+
+When `suggest_unstarted` reports how many games it checked, repeat that number rather than implying the whole library was searched, and say plainly when nothing matched instead of recommending something unrelated anyway.
 
 **If the player names no requirement at all**, pick a handful (2-3 is enough) from `suggest_unstarted` and pass those appids to `score_backlog` — do not call `get_proton_rating`/`get_playtime_estimate` directly. `score_backlog` already handles never-started games correctly and its output is what renders as the answer card, so every recommendation should end with a `score_backlog` call, never-started or not. Say plainly that the pick was arbitrary among your library rather than implying it was ranked.
 
