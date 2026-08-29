@@ -842,10 +842,21 @@ type DocumentSearchOutput = {
  * turn from a broken one. Reported exactly that way: "still waiting and got no
  * feedback".
  *
- * So the message escalates with the clock. It never claims progress it cannot
- * see, it just says what is actually likely to be happening by then.
+ * So the message escalates with the clock. What it must NOT do is assert a
+ * cause it cannot check: the first version said "the agent is warming up" at
+ * eight seconds on every turn, including the second question of a session,
+ * where the warm-up had already been paid and the claim was simply false. The
+ * warm-up line is now only offered when this is the first turn of the session,
+ * which is the only case where it is known to apply. After that it says the
+ * true and duller thing: this is taking a while and has not failed.
  */
-function WaitingNote({ label = "Thinking" }: { label?: string }) {
+function WaitingNote({
+  label = "Thinking",
+  firstTurn = false,
+}: {
+  label?: string;
+  firstTurn?: boolean;
+}) {
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
@@ -856,9 +867,13 @@ function WaitingNote({ label = "Thinking" }: { label?: string }) {
   const note =
     seconds < 8
       ? null
-      : seconds < 25
-        ? "First question after an update is slower: the agent is warming up."
-        : "Still going. This is the warm-up rather than a hang, and it usually clears inside a minute.";
+      : firstTurn
+        ? seconds < 25
+          ? "The first question of a session is the slow one: the agent is compiled on first use."
+          : "Still going. The first question can take up to a minute while that happens."
+        : seconds < 25
+          ? "Taking longer than usual."
+          : "Still going. It has not failed, but you can stop it and try again.";
 
   return (
     <div className="space-y-1">
@@ -1582,7 +1597,12 @@ export default function Home() {
 
                         return null;
                       })}
-                      {isComposing && <WaitingNote label="Working out the answer" />}
+                      {isComposing && (
+                        <WaitingNote
+                          label="Working out the answer"
+                          firstTurn={messageIndex === 0}
+                        />
+                      )}
                       {missingCitations.length > 0 && (
                         <SourceCitation sources={missingCitations} />
                       )}
@@ -1596,7 +1616,7 @@ export default function Home() {
                 agent.data.messages[agent.data.messages.length - 1]?.role !== "assistant" && (
                   <Message from="assistant">
                     <MessageContent>
-                      <WaitingNote />
+                      <WaitingNote firstTurn={agent.data.messages.length <= 1} />
                     </MessageContent>
                   </Message>
                 )}
