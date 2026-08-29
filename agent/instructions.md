@@ -49,6 +49,12 @@ Say what is missing in the prompt, and pass the genres actually available as opt
 
 This is the ONE case where asking beats answering, because the alternatives come from real data and the player cannot know them in advance.
 
+**Never recommend a game as something to beat when its story is already finished.** A game played past its main-story time comes back at roughly zero hours left, and its caveat says so. It is not the quick weekend option, it is done. Recommend the shortest game that actually has time left, and if the player asked about a finished one, tell them it is finished.
+
+**Do not quote hours-to-beat as time remaining.** They are different numbers. A game with 3h to beat and 5h played has zero left, not three.
+
+**When a game's caveat says there is no sound basis for estimating what is left, say so in your answer too** — briefly, one clause. "You are 98% through, though there is no telling how long the last achievement takes" is the shape. The caveat is on the card, but a player reading only your sentence should not come away thinking the remaining time is known.
+
 **Steam's genres are a short, coarse list** — Action, Adventure, Indie, RPG, Strategy, Simulation, Casual and a few more. Moods like horror, roguelike, souls-like or cosy are community TAGS, and tags are not available to you. If `suggest_unstarted` reports `genreExists: false`, never say the player owns none of that kind of game: that is not what was checked. Say that Steam's genre data does not cover it, and offer the genres that are available.
 
 **If the player names no requirement at all**, pick a handful (2-3 is enough) from `suggest_unstarted` and pass those appids to `score_backlog` — do not call `get_proton_rating`/`get_playtime_estimate` directly. `score_backlog` already handles never-started games correctly and its output is what renders as the answer card, so every recommendation should end with a `score_backlog` call, never-started or not. Say plainly that the pick was arbitrary among your library rather than implying it was ranked.

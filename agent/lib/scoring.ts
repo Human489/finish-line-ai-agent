@@ -49,6 +49,11 @@ export type ScoredGame = {
      */
     spentTheBudget: boolean;
     /**
+     * Beat-once mode, and playtime already exceeds the main story. The game is
+     * finished for the purposes of the question being asked.
+     */
+    storyAlreadyBeaten: boolean;
+    /**
      * True when we could not determine whether this game has achievements at
      * all (a failed/partial Steam lookup), as opposed to a confirmed absence.
      * The UI and dataGaps wording must not claim "no achievements" in this
@@ -330,6 +335,30 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
    * total, not at some fraction of it. A player at 90% of the completionist
    * time still has a total that plausibly describes their route.
    */
+  /*
+   * The story is already done, so there is nothing here to "beat".
+   *
+   * In beat-once mode the remaining figure is hoursToBeat minus hoursPlayed,
+   * floored at zero, so a game played past its main story sits at ~0h left. It
+   * then scores as a Finish Line candidate and gets recommended for the
+   * weekend, which is the opposite of useful.
+   *
+   * Reported by a player: Lil Gator Game came back "~0h left" on the card and
+   * "the quickest option for the weekend, requiring only about 3.2 hours to
+   * beat" in the sentence. Both numbers are real - 3.2h IS the main story - but
+   * quoting the whole story length as though it were work remaining, for a game
+   * already finished, is a wrong claim built from right figures. The grounding
+   * check cannot catch that, because every number in it is genuine.
+   */
+  const storyAlreadyBeaten =
+    effectiveMode === "beat-once" && estHoursRemaining !== null && estHoursRemaining <= 0;
+
+  if (storyAlreadyBeaten) {
+    dataGaps.push(
+      "The main story is already finished, so there is nothing left to beat here. Do not offer this as something to play through, and do not quote the hours-to-beat figure as time remaining.",
+    );
+  }
+
   const spentTheBudget =
     effectiveMode === "completionist" &&
     fullCompletionHours !== null &&
@@ -462,6 +491,7 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
       hasAchievements,
       remainingIsFloor,
       spentTheBudget,
+      storyAlreadyBeaten,
       achievementsUnknown: achievements?.unknown ?? false,
       dataGaps,
     },
