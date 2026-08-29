@@ -370,7 +370,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         roughly double the width and costs nothing in height, because the
         artwork was the tall part.
       */}
-      <div className="w-24 sm:w-auto">
+      {/*
+        16, not 24. Measured on a 375px screen: at w-24 the artwork took 96px of
+        a 271px card and left the text 147px, which is NARROWER than the 159px
+        it had at 2-up. Going one card per row only helps if the text actually
+        gets the space. At w-16 the text gets ~179px and the art is still
+        legible at 64x96.
+      */}
+      <div className="w-16 sm:w-auto">
         <GameArtwork appid={game.appid} name={game.name} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col sm:contents">
