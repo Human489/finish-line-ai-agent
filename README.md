@@ -292,7 +292,7 @@ This triggers eve's cold-start compilation before the first real user request in
 | `npx tsx scripts/smoke.ts [profile]`      | Runs the keyless API and scoring path end-to-end against a real Steam profile  |
 | `npx tsx scripts/smoke-keys.ts`           | Checks that both API keys work                                                 |
 | `npx tsx scripts/time-sweep.ts [profile]` | Measures how long each data source takes                                       |
-| `npx tsx scripts/warm-eve.ts [baseUrl]`   | Triggers eve's cold start ahead of time                                        |
+| `npx tsx scripts/warm-eve.ts [baseUrl]`   | Triggers eve's cold start ahead of time. Defaults to the port above            |
 
 Scripts that accept `[profile]` require a Steam profile with its profile and game details set to public.
 
