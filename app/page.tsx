@@ -1305,6 +1305,50 @@ export default function Home() {
                   .map((part) => part.output as ScoreBacklogOutput)
                   .at(-1);
 
+                // EVERY score_backlog result in the turn, merged into one grid.
+                //
+                // The model is told to call it once and sometimes calls it
+                // three times, hunting for a candidate. That rendered three
+                // separate grids, twelve cards, and pushed the answer off the
+                // screen. Merging is better than trusting the instruction: the
+                // player sees one shortlist however many times the model
+                // searched for it.
+                //
+                // Ordered so games with something left to play come first, then
+                // capped, because a finished game is the least useful card on
+                // screen and was otherwise crowding out the real candidates.
+                const allScoreParts = parts.filter(
+                  (part): part is DynamicToolPart =>
+                    part.type === "dynamic-tool" &&
+                    part.toolName === "score_backlog" &&
+                    part.state === "output-available" &&
+                    Array.isArray((part.output as ScoreBacklogOutput | undefined)?.scored),
+                );
+
+                const mergedScored: ScoredGameResult[] = [];
+                const seenAppids = new Set<number>();
+                for (const part of allScoreParts) {
+                  for (const game of (part.output as ScoreBacklogOutput).scored) {
+                    if (seenAppids.has(game.appid)) continue;
+                    seenAppids.add(game.appid);
+                    mergedScored.push(game);
+                  }
+                }
+                const rankedScored = [
+                  ...mergedScored.filter((game) => !game.facts.storyAlreadyBeaten),
+                  ...mergedScored.filter((game) => game.facts.storyAlreadyBeaten),
+                ].slice(0, 4);
+
+                const mergedOutput: ScoreBacklogOutput | undefined =
+                  allScoreParts.length > 0
+                    ? {
+                        ...(allScoreParts[0].output as ScoreBacklogOutput),
+                        scored: rankedScored,
+                      }
+                    : undefined;
+
+                const firstScorePartId = allScoreParts[0]?.toolCallId;
+
                 const scoreOutput = parts.find(
                   (part): part is DynamicToolPart =>
                     part.type === "dynamic-tool" &&
@@ -1318,9 +1362,15 @@ export default function Home() {
                 // FallbackAnswer below they must not: substituting a sentence
                 // about a game this turn never scored would answer a different
                 // question from the one asked.
-                const groundingBasis = scoreOutput ?? earlierScoreOutput;
+                // Grounding checks against EVERY game scored this turn, not
+                // just the four shown: the model legitimately compares against
+                // one that did not make the grid.
+                const groundingBasis: ScoreBacklogOutput | undefined =
+                  mergedScored.length > 0
+                    ? { ...(allScoreParts[0].output as ScoreBacklogOutput), scored: mergedScored }
+                    : (scoreOutput ?? earlierScoreOutput);
 
-                const fallbackOutput = showFallback ? scoreOutput : undefined;
+                const fallbackOutput = showFallback ? mergedOutput : undefined;
 
                 // Every source this turn actually answered from. Searches that
                 // found nothing, or errored, are excluded: there is nothing to
@@ -1428,6 +1478,13 @@ export default function Home() {
                           }
 
                           if (part.toolName === "score_backlog") {
+                            // One grid for the turn, at the first call.
+                            if (part.toolCallId !== firstScorePartId) return null;
+                            if (mergedOutput) {
+                              return (
+                                <ScoreBacklogResults key={part.toolCallId} output={mergedOutput} />
+                              );
+                            }
                             return <ScoreBacklogAnswer key={part.toolCallId} part={part} />;
                           }
                           if (part.toolName === "search_documents") {
