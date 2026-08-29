@@ -311,6 +311,16 @@ export type GameDetails = {
   /** Steam's own review bucket, e.g. "Overwhelmingly Positive". Null if too few reviews. */
   reviewSummary: string | null;
   totalReviews: number;
+  /**
+   * The store did not answer for this game, so an empty genre list and a
+   * missing review score mean "not known", not "none".
+   *
+   * appdetails does not batch and is called once per game, so it throttles
+   * readily. Without this, one failed lookup in a shortlist reads exactly like
+   * a game Steam has filed under no genre at all, and the model says "this
+   * isn't tagged Horror" about a game it never managed to ask about.
+   */
+  lookupFailed: boolean;
 };
 
 /**
@@ -325,6 +335,7 @@ export async function getGameDetails(appid: number): Promise<GameDetails> {
     genres: [],
     reviewSummary: null,
     totalReviews: 0,
+    lookupFailed: false,
   };
 
   const [detailsResult, reviewsResult] = await Promise.allSettled([
@@ -338,8 +349,16 @@ export async function getGameDetails(appid: number): Promise<GameDetails> {
     ).then((r) => r.json()),
   ]);
 
+  if (detailsResult.status === "rejected") {
+    // Only the details call sets this. A missing review score is ordinary - a
+    // game with too few reviews genuinely has none - but a missing genre list
+    // is either a fact or a failure, and those must not look alike.
+    empty.lookupFailed = true;
+  }
+
   if (detailsResult.status === "fulfilled") {
     const entry = detailsResult.value?.[String(appid)];
+    if (!entry) empty.lookupFailed = true;
     if (entry?.success) {
       empty.name = entry.data?.name ?? null;
       empty.genres = (entry.data?.genres ?? []).map(

@@ -63,9 +63,27 @@ export default defineTool({
       else failedLookups.push(wanted[index]);
     });
 
+    // A game whose store lookup failed is reported separately from one that
+    // genuinely has no genres. Both come back with an empty list, and only one
+    // of them is a fact about the game.
+    const unreadable = games.filter((game) => game.lookupFailed).map((game) => game.appid);
+
     return {
-      games,
+      // lookupFailed is dropped from each game and surfaced once below, so the
+      // model reads one clear statement rather than a flag per row.
+      games: games.map((game) => ({
+        appid: game.appid,
+        name: game.name,
+        genres: game.genres,
+        reviewSummary: game.reviewSummary,
+        totalReviews: game.totalReviews,
+      })),
       failedLookups: failedLookups.length > 0 ? failedLookups : undefined,
+      couldNotRead: unreadable.length > 0 ? unreadable : undefined,
+      note:
+        unreadable.length > 0
+          ? `The Steam store did not answer for ${unreadable.join(", ")}. Their genres and review scores are UNKNOWN, not absent - do not say a game is not in a genre when it is on this list.`
+          : undefined,
     };
   },
 });
