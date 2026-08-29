@@ -8,6 +8,7 @@ import {
   resolveTag,
   suggestTags,
   taggedAppids,
+  tagTerm,
   type Facets,
 } from "../lib/tags";
 
@@ -100,8 +101,7 @@ export default defineTool({
      * what makes a 12 second budget enough: the matches are usually in the
      * first batch instead of four hundred games down the library.
      */
-    const hintTag = await resolveTag(genre).catch(() => null);
-    const hint = hintTag ? await taggedAppids(hintTag).catch(() => new Set<number>()) : new Set<number>();
+    const hint = await taggedAppids(tagTerm(genre)).catch(() => new Set<number>());
 
     const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
       unstarted.map((game) => game.appid),

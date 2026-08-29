@@ -130,6 +130,19 @@ const SPELLING: Record<string, string> = {
 let tagCache: { names: Map<string, string>; fetchedAt: number } | null = null;
 const TAG_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * The player's word, spelling-corrected, for use as a SteamSpy tag.
+ *
+ * Exported so the candidate hint can be built WITHOUT Steam's tag list. That
+ * list lives on store.steampowered.com, which throttles this app's serverless
+ * IP, and when the fetch failed the hint came back empty, the scan fell back to
+ * library order, and cosy games four hundred entries down were never reached.
+ * SteamSpy's tag endpoint is case-insensitive, so the raw word is enough.
+ */
+export function tagTerm(term: string): string {
+  return normalise(term);
+}
+
 function normalise(term: string): string {
   const cleaned = term.trim().toLowerCase();
   return SPELLING[cleaned.replace(/[\s-]/g, "")] ?? cleaned;
