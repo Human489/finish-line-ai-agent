@@ -5,7 +5,7 @@
  *   api.steampowered.com   - needs STEAM_WEB_API_KEY, 100k calls/day, burst throttled.
  *   store/community        - keyless, undocumented, rate limited by IP.
  *
- * Every keyed call goes through `keyedFetch`, which retries on 429 with backoff.
+ * Every call goes through `steamFetch`, which retries a 429 or a 5xx with backoff.
  */
 
 /**
@@ -81,15 +81,30 @@ function apiKey(): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function keyedFetch(url: string, attempt = 0): Promise<Response> {
+/**
+ * Every Steam call goes through this: retries a throttle or a server error
+ * before letting it become the visitor's problem.
+ *
+ * 5xx is retried as well as 429 because both are Steam having a moment rather
+ * than anything wrong with the request. This app runs on serverless, where the
+ * outbound IP is shared with whoever else is on that instance, so being
+ * throttled through no fault of your own is a normal event rather than an edge
+ * case. A player reported "Steam did not respond properly just now" on a
+ * profile that resolves perfectly a second later, which is exactly this.
+ *
+ * Only status codes are retried. A 401 or 403 is a key problem and will fail
+ * identically every time, and a 404 means what it says.
+ */
+async function steamFetch(url: string, attempt = 0): Promise<Response> {
   const response = await fetch(url, {
     cache: "no-store",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
 
-  if (response.status === 429 && attempt < 4) {
-    await sleep(500 * 2 ** attempt);
-    return keyedFetch(url, attempt + 1);
+  const worthRetrying = response.status === 429 || response.status >= 500;
+  if (worthRetrying && attempt < 3) {
+    await sleep(400 * 2 ** attempt);
+    return steamFetch(url, attempt + 1);
   }
 
   return response;
@@ -118,10 +133,9 @@ export async function resolveSteamId(
     ? `${COMMUNITY}/profiles/${candidate}/?xml=1`
     : `${COMMUNITY}/id/${encodeURIComponent(candidate)}/?xml=1`;
 
-  const response = await fetch(target, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  // Was a bare fetch with no retry at all, which is how a single throttled
+  // request became a dead end on the very first screen.
+  const response = await steamFetch(target);
   if (!response.ok) {
     throw new SteamUnavailableError(response.status);
   }
@@ -148,7 +162,7 @@ export async function getOwnedGames(steamId: string): Promise<OwnedGame[]> {
     `${WEB_API}/IPlayerService/GetOwnedGames/v1/` +
     `?key=${apiKey()}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1&format=json`;
 
-  const response = await keyedFetch(url);
+  const response = await steamFetch(url);
 
   if (response.status === 401 || response.status === 403) {
     throw new SteamKeyRejectedError();
@@ -216,7 +230,7 @@ export async function getAchievementProgress(
 
   let response: Response;
   try {
-    response = await keyedFetch(url);
+    response = await steamFetch(url);
   } catch {
     return unknown;
   }
