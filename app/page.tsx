@@ -498,8 +498,9 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
   return (
     <div className="space-y-2 p-3">
       {/*
-        2 up on phones, 3 from lg. The page shell is max-w-3xl (768px), so at
-        3-up each card is roughly 230px — workable only because the card was
+        2 up on phones, 4 from lg, and score_backlog returns at most 4, so the
+        whole answer is one row on either. The page shell is max-w-3xl (768px),
+        so at 4-up each card is roughly 175px — workable only because the card was
         made compact for it: the category badge moved off the title line onto
         its own row, the title is clamped to two lines, the artwork was
         shortened from 2:3 to 4:5, and the supporting figures dropped to 11px.
@@ -509,7 +510,7 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
         Grid, not flex-wrap: a row mixes cards with 0 and 3 caveat lines, and
         grid's row-track sizing equalises their heights for free.
       */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
         ))}
@@ -795,9 +796,19 @@ type DocumentSearchOutput = {
  * live progress worth watching, and hiding it would make a slow first turn look
  * like a hung one.
  */
-function ToolCallSummary({ parts }: { parts: DynamicToolPart[] }) {
-  if (parts.length === 0) return null;
+function ToolCallSummary({
+  all,
+  expandable,
+}: {
+  all: DynamicToolPart[];
+  expandable: DynamicToolPart[];
+}) {
+  if (all.length === 0) return null;
 
+  // Counted over EVERY call, including the ones that render their own display.
+  // A turn whose only call was score_backlog showed a card and no step line at
+  // all, so there was nothing on screen saying the numbers came from a tool.
+  const parts = all;
   const names = [...new Set(parts.map((part) => part.toolName))];
   // "Not finished" is not the same as "still going". An errored call sat in the
   // summary reading "(1 running)" forever, so a failed turn and a stuck one
@@ -817,9 +828,13 @@ function ToolCallSummary({ parts }: { parts: DynamicToolPart[] }) {
         <span className="opacity-60"> · {names.join(", ")}</span>
       </summary>
       <div className="mt-3 space-y-2">
-        {parts.map((part) => (
-          <ToolCall key={part.toolCallId} part={part} />
-        ))}
+        {expandable.length > 0 ? (
+          expandable.map((part) => <ToolCall key={part.toolCallId} part={part} />)
+        ) : (
+          <p className="text-muted-foreground">
+            Shown in full below rather than in here.
+          </p>
+        )}
       </div>
     </details>
   );
@@ -1261,6 +1276,28 @@ export default function Home() {
                 // not the model went silent: with no text it supplies the
                 // fallback sentence, and with text it supplies the numbers that
                 // text is checked against.
+                // The model sometimes answers a follow-up from what it already
+                // knows, without calling score_backlog again. Observed live:
+                // "Hollow Knight, 2 to 4.3h" with no tool call in the turn at
+                // all, which meant no card AND no grounding check, because the
+                // check needs a scorer result to check against. Falling back to
+                // the most recent scored output in the conversation keeps those
+                // answers verified. The figures came from that output
+                // originally, so it is the right thing to check them against.
+                const earlierScoreOutput = agent.data.messages
+                  .slice(0, messageIndex)
+                  .flatMap((earlier) => earlier.parts)
+                  .filter(
+                    (part): part is DynamicToolPart =>
+                      part.type === "dynamic-tool" &&
+                      part.toolName === "score_backlog" &&
+                      part.state === "output-available" &&
+                      Array.isArray((part.output as ScoreBacklogOutput | undefined)?.scored) &&
+                      (part.output as ScoreBacklogOutput).scored.length > 0,
+                  )
+                  .map((part) => part.output as ScoreBacklogOutput)
+                  .at(-1);
+
                 const scoreOutput = parts.find(
                   (part): part is DynamicToolPart =>
                     part.type === "dynamic-tool" &&
@@ -1269,6 +1306,12 @@ export default function Home() {
                     Array.isArray((part.output as ScoreBacklogOutput | undefined)?.scored) &&
                     ((part.output as ScoreBacklogOutput).scored.length > 0),
                 )?.output as ScoreBacklogOutput | undefined;
+
+                // For CHECKING, an earlier turn's scores count. For the
+                // FallbackAnswer below they must not: substituting a sentence
+                // about a game this turn never scored would answer a different
+                // question from the one asked.
+                const groundingBasis = scoreOutput ?? earlierScoreOutput;
 
                 const fallbackOutput = showFallback ? scoreOutput : undefined;
 
@@ -1299,7 +1342,7 @@ export default function Home() {
                 // about which game to play, so a source line under it would
                 // credit a document the displayed text never used. Evaluated
                 // per part, exactly as GroundedText does it, so the two agree.
-                const quotable = scoreOutput?.scored.map(quotableMetrics);
+                const quotable = groundingBasis?.scored.map(quotableMetrics);
                 const groundingWillReplace = quotable
                   ? renderedTexts.some((text) => findUngroundedNumbers(text, quotable).length > 0)
                   : false;
@@ -1307,18 +1350,25 @@ export default function Home() {
                 // Everything that would otherwise render as a bare tool card.
                 // score_backlog and search_documents have their own displays and
                 // are the answer itself, so they are never folded away.
-                const plumbing = parts.filter((part): part is DynamicToolPart => {
-                  if (part.type !== "dynamic-tool") return false;
-                  if (part.toolMetadata?.eve?.inputRequest) return false;
-                  return part.toolName !== "score_backlog" && part.toolName !== "search_documents";
-                });
-
                 const isLiveSweep = (part: DynamicToolPart) =>
                   part.toolName === "sweep_achievements" &&
                   (part.output as SweepSnapshot | undefined)?.phase === "sweeping";
 
-                const folded = plumbing.filter((part) => !isLiveSweep(part));
-                const foldedAt = folded[0]?.toolCallId;
+                const everyCall = parts.filter((part): part is DynamicToolPart => {
+                  if (part.type !== "dynamic-tool") return false;
+                  return !part.toolMetadata?.eve?.inputRequest;
+                });
+
+                // A running sweep keeps its own card; it is the only tool with
+                // live progress and hiding it makes a slow turn look hung.
+                const summarised = everyCall.filter((part) => !isLiveSweep(part));
+
+                // score_backlog and search_documents ARE the answer, so they
+                // render below rather than inside the fold. They still count.
+                const expandable = summarised.filter(
+                  (part) =>
+                    part.toolName !== "score_backlog" && part.toolName !== "search_documents",
+                );
 
                 const missingCitations =
                   (isBusy && isLastMessage) || groundingWillReplace
@@ -1328,6 +1378,9 @@ export default function Home() {
                 return (
                   <Message key={message.id} from={message.role}>
                     <MessageContent>
+                      {message.role === "assistant" && (
+                        <ToolCallSummary all={summarised} expandable={expandable} />
+                      )}
                       {parts.map((part, index) => {
                         if (part.type === "text") {
                           // Interim narration: the model talking to itself
@@ -1346,7 +1399,7 @@ export default function Home() {
                             <GroundedText
                               key={index}
                               text={part.text}
-                              output={scoreOutput}
+                              output={groundingBasis}
                               streaming={isBusy && isLastMessage}
                             />
                           );
@@ -1373,13 +1426,10 @@ export default function Home() {
                           if (part.toolName === "search_documents") {
                             return <DocumentMatches key={part.toolCallId} part={part} />;
                           }
-                          // A running sweep keeps its own card; everything else
-                          // collapses into one line at the first folded call.
+                          // Everything else is already counted in the summary
+                          // above; only a running sweep keeps its own card.
                           if (isLiveSweep(part)) {
                             return <ToolCall key={part.toolCallId} part={part} />;
-                          }
-                          if (part.toolCallId === foldedAt) {
-                            return <ToolCallSummary key={part.toolCallId} parts={folded} />;
                           }
                           return null;
                         }

@@ -28,11 +28,11 @@ import {
  * The category returned here is final. The model is not permitted to choose,
  * change or soften it — see instructions.md.
  */
-// Five, not ten. Every scored game renders a card, and ten cards is a wall the
-// player has to scroll past to reach the one sentence that answers them. The
-// answer names ONE game, so the shortlist only has to be long enough to choose
-// from. It also halves the payload the model reads back.
-const MAX_GAMES = 5;
+// Four, not ten. Every scored game renders a card, and the grid is four across
+// on desktop and two on phones, so four fills exactly one row on both and the
+// whole answer fits in one screenshot. The answer names ONE game, so the
+// shortlist only has to be long enough to choose from.
+const MAX_GAMES = 4;
 const CONCURRENCY = 5;
 
 export default defineTool({

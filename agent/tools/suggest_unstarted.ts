@@ -141,9 +141,19 @@ export default defineTool({
     //     tag, and tags are not on this endpoint. No scan would ever find it.
     //   - a real genre that this scan did not reach: only the sample is
     //     exhausted, not the library.
+    // Matched against the WHOLE requested phrase, not any substring of it.
+    // `wanted.includes(g)` was wrong in a way that showed up immediately:
+    // "zoological accounting" contains "accounting", which is a real Steam
+    // genre, so a nonsense phrase was reported as a genuine genre nobody owned.
+    // Singular/plural is the only flex worth having ("RPGs", "strategy games"
+    // arrive as "rpgs"/"strategy").
+    const singular = wanted.replace(/s$/, "");
     const isSteamGenre =
-      STEAM_GENRES.some((g) => g.includes(wanted) || wanted.includes(g)) ||
-      [...seen].some((g) => g.toLowerCase().includes(wanted));
+      STEAM_GENRES.some((g) => g === wanted || g === singular || g.replace(/s$/, "") === singular) ||
+      [...seen].some((g) => {
+        const seenLower = g.toLowerCase();
+        return seenLower === wanted || seenLower === singular;
+      });
     const scannedEverything = checked >= unstarted.length;
     const available = [...seen].sort();
 
