@@ -9,6 +9,28 @@ const GENRE_BATCH = 40;
 const GENRE_MAX_SCAN = 200;
 
 /**
+ * Steam's entire store genre vocabulary.
+ *
+ * Membership of THIS decides whether a word is a genre Steam publishes, rather
+ * than whether it happened to appear in the games scanned. Deriving it from the
+ * scan was wrong in a way that mattered: on a library where the only Racing
+ * games sit past the scan ceiling, "Racing" would have been reported as a genre
+ * Steam does not have, which is false and unfalsifiable from the player's side.
+ *
+ * Steam publishes no endpoint for this list, so it is written down. It changes
+ * about never, and being slightly stale only costs a vaguer sentence: an
+ * unknown word still gets scanned for, it just is not called a non-genre.
+ */
+const STEAM_GENRES = [
+  "action", "adventure", "casual", "early access", "free to play", "indie",
+  "massively multiplayer", "racing", "rpg", "simulation", "sports", "strategy",
+  "violent", "gore", "nudity", "sexual content", "documentary", "education",
+  "software training", "utilities", "video production", "web publishing",
+  "animation & modeling", "audio production", "design & illustration",
+  "game development", "photo editing", "accounting",
+];
+
+/**
  * Never-started games cost nothing to surface: zero playtime means zero
  * achievements, so no keyed call is needed to categorise them. Used when the
  * started-and-unfinished candidates run dry.
@@ -114,7 +136,15 @@ export default defineTool({
     // So "no horror games" was never true; "Steam does not tell me which ones
     // are horror" is. Those are different sentences and the player deserves the
     // second one.
-    const genreExists = [...seen].some((g) => g.toLowerCase().includes(wanted));
+    // Two different failures, and they were being reported as one.
+    //   - not a Steam genre at all ("horror", "roguelike", "cosy"): a community
+    //     tag, and tags are not on this endpoint. No scan would ever find it.
+    //   - a real genre that this scan did not reach: only the sample is
+    //     exhausted, not the library.
+    const isSteamGenre =
+      STEAM_GENRES.some((g) => g.includes(wanted) || wanted.includes(g)) ||
+      [...seen].some((g) => g.toLowerCase().includes(wanted));
+    const scannedEverything = checked >= unstarted.length;
     const available = [...seen].sort();
 
     return {
@@ -122,15 +152,18 @@ export default defineTool({
       genre,
       checked,
       failedLookups,
-      genreExists,
+      genreExists: isSteamGenre,
+      scannedEverything,
       availableGenres: available,
       games: matches.slice(0, limit),
       note:
         matches.length > 0
           ? `Genres are Steam's own. Found ${matches.length} matching "${genre}" within the first ${checked} of ${unstarted.length} unstarted games. Pass appids to score_backlog before recommending one.`
-          : genreExists
-            ? `Checked ${checked} of ${unstarted.length} unstarted games and none listed "${genre}". Say you looked at ${checked} of them rather than implying the whole library was searched.`
-            : `Steam does not publish "${genre}" as a genre, so this cannot be answered from genre data at all — it is a community tag, and tags are not available here. Do NOT say the player owns no ${genre} games, because that is not what was checked. Tell them Steam's genre data does not cover ${genre}, and offer the genres it does cover for these games: ${available.join(", ")}.`,
+          : !isSteamGenre
+            ? `Steam does not publish "${genre}" as a genre, so this cannot be answered from genre data at all — it is a community tag, and tags are not available here. Do NOT say the player owns no ${genre} games, because that is not what was checked. Tell them Steam's genre data does not cover ${genre}, and offer the genres it does cover for these games: ${available.join(", ")}.`
+            : scannedEverything
+              ? `"${genre}" is a real Steam genre, and none of the player's ${unstarted.length} unstarted games list it. This one IS safe to state as a fact about their library.`
+              : `"${genre}" is a real Steam genre, but none of the ${checked} games checked list it, and that is only the first ${checked} of ${unstarted.length} unstarted games. Say exactly that. Do NOT say they own no ${genre} games: the rest were never looked at.`,
     };
   },
 });

@@ -799,14 +799,21 @@ function ToolCallSummary({ parts }: { parts: DynamicToolPart[] }) {
   if (parts.length === 0) return null;
 
   const names = [...new Set(parts.map((part) => part.toolName))];
-  const pending = parts.filter((part) => part.state !== "output-available").length;
+  // "Not finished" is not the same as "still going". An errored call sat in the
+  // summary reading "(1 running)" forever, so a failed turn and a stuck one
+  // looked identical from the outside.
+  const failed = parts.filter((part) => part.state === "output-error").length;
+  const running = parts.filter(
+    (part) => part.state !== "output-available" && part.state !== "output-error",
+  ).length;
 
   return (
     <details className="group rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
       <summary className="cursor-pointer select-none list-none">
         <span className="group-open:hidden">Show </span>
         {parts.length} {parts.length === 1 ? "step" : "steps"}
-        {pending > 0 ? ` (${pending} running)` : ""}
+        {running > 0 ? ` (${running} running)` : ""}
+        {failed > 0 ? ` (${failed} failed)` : ""}
         <span className="opacity-60"> · {names.join(", ")}</span>
       </summary>
       <div className="mt-3 space-y-2">

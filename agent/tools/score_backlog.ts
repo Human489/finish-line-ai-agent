@@ -28,10 +28,6 @@ import {
  * The category returned here is final. The model is not permitted to choose,
  * change or soften it — see instructions.md.
  */
-// 10, not 20. Twenty cards is more than anyone reads, and the answer is one
-// recommendation — the extra fifteen are scrolling, not information. It also
-// halves the per-turn enrichment: score_backlog is the only tool that hits
-// HowLongToBeat, one request per game.
 // Five, not ten. Every scored game renders a card, and ten cards is a wall the
 // player has to scroll past to reach the one sentence that answers them. The
 // answer names ONE game, so the shortlist only has to be long enough to choose

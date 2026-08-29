@@ -671,8 +671,15 @@ export function templateReason(game: ScoredGame): string {
   // achievements, roughly 2h to 4.3h left" - a verdict and three figures
   // belonging to no game in particular, in answer to "what should I finish".
   //
-  // Safe for findUngroundedNumbers: it ignores bare digits precisely because
-  // most of them in this domain are titles ("Portal 2", "Left 4 Dead 2"), so a
-  // name cannot be mistaken for an unsupported claim.
+  // Safe here for two reasons. findUngroundedNumbers ignores bare digits,
+  // precisely because most of them in this domain are titles ("Portal 2",
+  // "Left 4 Dead 2"); and this sentence is rendered directly rather than
+  // re-checked, so it cannot reject itself.
+  //
+  // Note the checker is NOT immune to titles generally: "9 Hours, 9 Persons, 9
+  // Doors" carries a number with a unit, so the model quoting that title in its
+  // own prose would read as an unsupported "9 hours" claim and lose an
+  // otherwise correct sentence. That fails safe, to this text, but it is a
+  // known false positive rather than something the design handles.
   return `${game.name}: ${game.categoryLabel}, ${parts.join(", ")}.`;
 }
