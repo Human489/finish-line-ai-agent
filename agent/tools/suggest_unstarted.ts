@@ -103,9 +103,19 @@ export default defineTool({
      */
     const hint = await taggedAppids(tagTerm(genre)).catch(() => new Set<number>());
 
+    /*
+     * The CORRECTED word, not the raw one.
+     *
+     * The hint was already built from tagTerm(genre) - "cosy" becomes "cozy" -
+     * while the match test still compared against the raw word. Steam's tag is
+     * "Cozy", so the scan checked every game in the library against a string
+     * that appears nowhere and reported, with a straight face, that none of
+     * them are cosy. tagTerm leaves any word it does not correct alone, so
+     * genres pass through untouched.
+     */
     const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
       unstarted.map((game) => game.appid),
-      genre,
+      tagTerm(genre),
       limit,
       async (appid) => {
         const known = facetCache.get(appid);
