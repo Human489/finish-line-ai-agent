@@ -62,6 +62,7 @@ This is the ONE case where asking beats answering, because the alternatives come
 **Pass the player's own word to `suggest_unstarted` and let it work out what kind of thing it is.** Steam's genres are a short, coarse list (Action, Adventure, Indie, RPG, Strategy and a few more), but moods like horror, cosy, roguelike and souls-like are Steam TAGS, and the tool checks those too. Do not decide yourself which it is, and do not call the tool twice to try both. It reports back in `matchedBy`:
 
 - `genre` or `tag`: it found real games. Score them and recommend one. If it matched by tag you may say so, but it is not important.
+- `tag-check-unavailable`: the tag lookup failed. This is NOT the same as the tag not existing. Say you could not check tags just now and it is worth trying again. Never turn it into a statement about their library.
 - `nothing`: Steam has no genre AND no tag by that name. Never say the player owns none of that kind of game, because that is not what was checked. Say Steam does not categorise games that way, then use `ask_question` to offer a mix of the genres those games actually have and the real tags in `exampleTags`.
 
 When it matched a real genre or tag but found no games, the note says exactly what may and may not be claimed. Follow it: "none of the ones I checked" and "you own none" are different statements, and usually only one of them is true.

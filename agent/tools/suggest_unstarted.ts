@@ -170,7 +170,34 @@ export default defineTool({
      * would muddle "you own none" with "Steam files that differently".
      */
     if (matches.length === 0 && !isSteamGenre) {
-      const canonicalTag = await resolveTag(genre).catch(() => null);
+      /*
+       * "Could not check" and "does not exist" are different answers.
+       *
+       * This was `.catch(() => null)`, which collapsed them: when Steam's tag
+       * list did not load, the tool reported that Steam has no such tag, and
+       * the app told a player "Steam doesn't categorise games as cosy" about a
+       * tag Steam publishes. A lookup failure dressed up as a fact is the exact
+       * mistake AchievementProgress.unknown exists to prevent elsewhere.
+       */
+      let canonicalTag: string | null = null;
+      let tagCheckFailed = false;
+      try {
+        canonicalTag = await resolveTag(genre);
+      } catch {
+        tagCheckFailed = true;
+      }
+
+      if (tagCheckFailed) {
+        return {
+          totalUnstarted: unstarted.length,
+          genre,
+          checked,
+          matchedBy: "tag-check-unavailable" as const,
+          availableGenres: available,
+          games: [],
+          note: `Steam's tag list could not be reached, so it is UNKNOWN whether "${genre}" is a tag. Do NOT say Steam has no such tag and do NOT say the player owns none. Say you could not check tags just now and it is worth trying again, and offer the genres you did manage to check: ${available.join(", ")}.`,
+        };
+      }
 
       if (canonicalTag === null) {
         const examples = await suggestTags().catch(() => []);
@@ -186,7 +213,22 @@ export default defineTool({
         };
       }
 
-      const tagged = await appidsWithTag(canonicalTag).catch(() => new Set<number>());
+      let tagged: Set<number>;
+      try {
+        tagged = await appidsWithTag(canonicalTag);
+      } catch {
+        // Same distinction again: the tag is real, the lookup is what failed.
+        return {
+          totalUnstarted: unstarted.length,
+          genre,
+          matchedBy: "tag-check-unavailable" as const,
+          tag: canonicalTag,
+          checked: 0,
+          availableGenres: available,
+          games: [],
+          note: `"${canonicalTag}" IS a real Steam tag, but the lookup of which games carry it failed. Say you could not check it just now. Do NOT say the player owns no ${canonicalTag} games.`,
+        };
+      }
       const candidates = unstarted.filter((game) => tagged.has(game.appid));
       const { matches: confirmed, checked: tagChecks } = await confirmTagged(
         candidates.map((game) => game.appid),
