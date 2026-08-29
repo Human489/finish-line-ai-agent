@@ -436,14 +436,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         */}
         {typeof metrics.estHoursRemainingLow === "number" &&
         typeof metrics.estHoursRemainingHigh === "number" ? (
-          <span>
+          <span className="whitespace-nowrap">
             <span className="font-medium tabular-nums">
               {metrics.estHoursRemainingLow}–{metrics.estHoursRemainingHigh}h
             </span>
             <span className="text-muted-foreground"> left (rarity-based)</span>
           </span>
         ) : facts.remainingIsFloor && typeof metrics.achievementsLeft === "number" ? (
-          <span>
+          <span className="whitespace-nowrap">
             <span className="font-medium tabular-nums">
               {metrics.achievementsLeft}
             </span>
@@ -455,7 +455,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
           </span>
         ) : (
           typeof hoursLeft === "number" && (
-            <span>
+            <span className="whitespace-nowrap">
               <span className="font-medium tabular-nums">~{hoursLeft}h</span>
               <span className="text-muted-foreground"> left</span>
             </span>
@@ -463,20 +463,20 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         )}
         {typeof rarity === "number" && (
           <>
-            <span aria-hidden className="text-muted-foreground/40">
+            <span aria-hidden className="hidden text-muted-foreground/40 sm:inline">
               ·
             </span>
-            <span className="text-muted-foreground tabular-nums">
+            <span className="whitespace-nowrap text-muted-foreground tabular-nums">
               {rarity}% unlock rate
             </span>
           </>
         )}
         {facts.protonTier && (
           <>
-            <span aria-hidden className="text-muted-foreground/40">
+            <span aria-hidden className="hidden text-muted-foreground/40 sm:inline">
               ·
             </span>
-            <span className="text-muted-foreground">
+            <span className="whitespace-nowrap text-muted-foreground">
               {titleCase(facts.protonTier)} on Linux
             </span>
           </>
@@ -484,7 +484,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
       </div>
 
       {(secondary.length > 0 || !facts.hasAchievements) && (
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+        /*
+          Each figure is its own non-breaking chunk rather than one joined
+          string. Joined, a 132px card broke it wherever it ran out of room -
+          "8.2h" on one line and "to 100%" on the next, with the separator dots
+          left dangling at the ends. The separators are hidden on phones too,
+          where the wrap already does the separating.
+        */
+        <p className="mt-1 flex flex-wrap gap-x-1.5 text-[11px] leading-snug text-muted-foreground">
           {[
             ...secondary,
             // achievementsUnknown means Steam never confirmed either way —
@@ -492,7 +499,16 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
             ...(facts.hasAchievements
               ? []
               : [facts.achievementsUnknown ? "achievement data unavailable" : "no achievements"]),
-          ].join(" · ")}
+          ].map((item, index, all) => (
+            <span key={item} className="whitespace-nowrap">
+              {item}
+              {index < all.length - 1 && (
+                <span aria-hidden className="hidden text-muted-foreground/40 sm:inline">
+                  {" ·"}
+                </span>
+              )}
+            </span>
+          ))}
         </p>
       )}
 
