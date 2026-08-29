@@ -116,16 +116,83 @@ export async function taggedAppids(tag: string): Promise<Set<number>> {
 }
 
 /**
- * British spellings and the obvious near-misses. Steam's tag is "Cozy", and a
- * player typing "cosy" is not asking a different question.
+ * A hand-written map of near-misses, kept ONLY for when Steam's tag list cannot
+ * be fetched. It is a poor substitute: it fixes the spellings someone thought
+ * of, and "cosy" cost a real bug before anyone thought of it. When the
+ * vocabulary is available, bestTagMatch does this properly.
  */
 const SPELLING: Record<string, string> = {
   cosy: "cozy",
-  greatsoundtrack: "great soundtrack",
   soulslike: "souls-like",
   soulsborne: "souls-like",
-  roguelite: "rogue-lite",
 };
+
+/** Lowercased, with the punctuation people vary on removed. */
+function fold(term: string): string {
+  return term.trim().toLowerCase().replace(/[\s\-_'']/g, "");
+}
+
+/** Levenshtein, bounded: anything past `limit` is not a candidate anyway. */
+function distance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      best = Math.min(best, current[j]);
+    }
+    if (best > limit) return limit + 1;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * The Steam tag a player most likely meant, or null if nothing is close.
+ *
+ * Pure, so it can be tested without the network. Tried in order of confidence:
+ * an exact fold, a plural, then a small edit distance. The distance step is
+ * what turns a whole class of bug into a non-event - "cosy" for Cozy,
+ * "roguelike" for Rogue-like, a doubled letter, a missing hyphen - rather than
+ * waiting for each one to be reported and added to a list by hand.
+ *
+ * Deliberately strict about what it will NOT match. A word has to be at least
+ * four characters before fuzzy matching applies, and the allowance is one edit
+ * for short words and two for long ones, so "zoological accounting" stays
+ * unmatched instead of being bent into "Accounting" - which would answer a
+ * question nobody asked.
+ */
+export function bestTagMatch(term: string, vocabulary: string[]): string | null {
+  const wanted = fold(term);
+  if (wanted.length === 0) return null;
+
+  const folded = vocabulary.map((name) => ({ name, key: fold(name) }));
+
+  const exact = folded.find((tag) => tag.key === wanted);
+  if (exact) return exact.name;
+
+  const singular = wanted.replace(/s$/, "");
+  const plural = folded.find((tag) => tag.key === singular || tag.key.replace(/s$/, "") === singular);
+  if (plural) return plural.name;
+
+  // Four, not five: "cosy" is four characters and is the exact case that
+  // started this. One edit is a tight allowance at that length.
+  if (wanted.length < 4) return null;
+  const limit = wanted.length >= 8 ? 2 : 1;
+
+  let best: { name: string; score: number } | null = null;
+  for (const tag of folded) {
+    const score = distance(wanted, tag.key, limit);
+    if (score <= limit && (best === null || score < best.score)) {
+      best = { name: tag.name, score };
+    }
+  }
+  return best?.name ?? null;
+}
 
 let tagCache: { names: Map<string, string>; fetchedAt: number } | null = null;
 const TAG_TTL_MS = 60 * 60 * 1000;
@@ -140,6 +207,25 @@ const TAG_TTL_MS = 60 * 60 * 1000;
  * SteamSpy's tag endpoint is case-insensitive, so the raw word is enough.
  */
 export function tagTerm(term: string): string {
+  return normalise(term);
+}
+
+/**
+ * The player's word, corrected against Steam's real tag vocabulary when it can
+ * be reached, and against the hand-written map when it cannot.
+ *
+ * Returns a lowercased term for matching. SteamSpy's tag endpoint is
+ * case-insensitive, so the case does not matter to it.
+ */
+export async function correctedTerm(term: string): Promise<string> {
+  try {
+    const names = await steamTagNames();
+    const match = bestTagMatch(term, [...names.values()]);
+    if (match) return match.toLowerCase();
+  } catch {
+    // Steam's tag list is on the host that throttles this app. Falling back to
+    // the hand-written map is worse but not nothing.
+  }
   return normalise(term);
 }
 

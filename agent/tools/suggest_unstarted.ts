@@ -8,7 +8,7 @@ import {
   resolveTag,
   suggestTags,
   taggedAppids,
-  tagTerm,
+  correctedTerm,
   type Facets,
 } from "../lib/tags";
 
@@ -101,7 +101,12 @@ export default defineTool({
      * what makes a 12 second budget enough: the matches are usually in the
      * first batch instead of four hundred games down the library.
      */
-    const hint = await taggedAppids(tagTerm(genre)).catch(() => new Set<number>());
+    // Corrected once, then used for BOTH the hint and the match test. Building
+    // them from different strings is precisely how "cosy" searched the whole
+    // library for a tag that does not exist while holding a list of the games
+    // that carry the one that does.
+    const term = await correctedTerm(genre);
+    const hint = await taggedAppids(term).catch(() => new Set<number>());
 
     /*
      * The CORRECTED word, not the raw one.
@@ -115,7 +120,7 @@ export default defineTool({
      */
     const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
       unstarted.map((game) => game.appid),
-      tagTerm(genre),
+      term,
       limit,
       async (appid) => {
         const known = facetCache.get(appid);

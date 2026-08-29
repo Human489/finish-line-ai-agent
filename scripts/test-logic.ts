@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { pooledSettled } from "../agent/lib/cache";
 import { citationsToShow } from "../agent/lib/citations";
+import { bestTagMatch } from "../agent/lib/tags";
 import { isCapacityError, withModelFallback } from "../agent/lib/model-fallback";
 import { CATEGORY_LABELS, THRESHOLDS, type Category } from "../agent/lib/categories";
 import type { AchievementProgress } from "../agent/lib/steam";
@@ -422,6 +423,45 @@ async function main() {
       [],
     );
   });
+
+  // --- fuzzy tag matching ------------------------------------------------
+
+  const STEAM_TAGS = [
+    "Horror", "Psychological Horror", "Survival Horror", "Cozy", "Souls-like",
+    "Roguelike", "Rogue-lite", "Strategy", "Puzzle", "Story Rich", "Accounting",
+    "Great Soundtrack", "Metroidvania",
+  ];
+
+  const matches: [string, string | null][] = [
+    // The bug that started this: Steam's tag is Cozy, the player types cosy.
+    ["cosy", "Cozy"],
+    ["Cozy", "Cozy"],
+    ["horror", "Horror"],
+    ["Horror", "Horror"],
+    // Punctuation people vary on.
+    ["souls-like", "Souls-like"],
+    ["soulslike", "Souls-like"],
+    ["metroid vania", "Metroidvania"],
+    ["great soundtrack", "Great Soundtrack"],
+    // Plurals.
+    ["roguelikes", "Roguelike"],
+    // A genuine typo.
+    ["rougelike", "Roguelike"],
+    ["strategey", "Strategy"],
+    // And the case that must NOT be bent into a match: it contains a real tag
+    // as a substring, and answering "Accounting" would answer a question
+    // nobody asked.
+    ["zoological accounting", null],
+    ["", null],
+    // Too short to fuzzy match, and not a real tag.
+    ["abc", null],
+  ];
+
+  for (const [input, expected] of matches) {
+    await test(`tag match: ${input || "(empty)"} -> ${expected ?? "nothing"}`, () => {
+      assert.equal(bestTagMatch(input, STEAM_TAGS), expected);
+    });
+  }
 
   await test("templateReason names the game", () => {
     const scored = scoreGame(
