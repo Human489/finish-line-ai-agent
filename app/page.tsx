@@ -215,6 +215,8 @@ type ScoredGameResult = Pick<ScoredGame, "appid" | "name" | "categoryLabel" | "m
   facts: Pick<ScoredGame["facts"], "protonTier" | "hasAchievements" | "achievementsUnknown" | "dataGaps"> & {
     /** estHoursRemaining is a lower bound, not an estimate. */
     remainingIsFloor?: boolean;
+    /** Beat-once mode, and the main story is already behind them. */
+    storyAlreadyBeaten?: boolean;
   };
   fallbackReason: string;
 };
@@ -707,7 +709,12 @@ function InputRequestCard({
  * per-game list would do exactly that.
  */
 function FallbackAnswer({ output }: { output: ScoreBacklogOutput }) {
-  const top = output.scored[0];
+  // Skip games whose story is already finished. The scorer ranks a completed
+  // game highly - it is, after all, as close to done as a game gets - so the
+  // top entry was recommending something with nothing left to play, which is
+  // the same mistake the model was told not to make. Falls back to the top
+  // entry when everything scored is finished, because saying nothing is worse.
+  const top = output.scored.find((game) => !game.facts.storyAlreadyBeaten) ?? output.scored[0];
   if (!top) return null;
 
   return <MessageResponse>{top.fallbackReason}</MessageResponse>;
