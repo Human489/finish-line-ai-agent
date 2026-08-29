@@ -798,7 +798,13 @@ function GroundedText({
   // that figure withheld from the model, so it must be withheld from the
   // allowed set too — otherwise the guard would accept the exact number the
   // suppression exists to keep off the screen.
-  const ungrounded = findUngroundedNumbers(text, output.scored.map(quotableMetrics));
+  // Titles are passed so a name like "9 Hours, 9 Persons, 9 Doors" is not read
+  // as a claim of nine hours and used to discard an otherwise correct sentence.
+  const ungrounded = findUngroundedNumbers(
+    text,
+    output.scored.map(quotableMetrics),
+    output.scored.map((game) => game.name),
+  );
 
   if (ungrounded.length === 0) {
     return <MessageResponse>{text}</MessageResponse>;
@@ -1431,8 +1437,11 @@ export default function Home() {
                 // credit a document the displayed text never used. Evaluated
                 // per part, exactly as GroundedText does it, so the two agree.
                 const quotable = groundingBasis?.scored.map(quotableMetrics);
+                const groundingTitles = groundingBasis?.scored.map((game) => game.name) ?? [];
                 const groundingWillReplace = quotable
-                  ? renderedTexts.some((text) => findUngroundedNumbers(text, quotable).length > 0)
+                  ? renderedTexts.some(
+                      (text) => findUngroundedNumbers(text, quotable, groundingTitles).length > 0,
+                    )
                   : false;
 
                 // Everything that would otherwise render as a bare tool card.

@@ -380,6 +380,49 @@ async function main() {
     );
   });
 
+  await test("a title carrying a unit word is not read as a claim", () => {
+    // "9 Hours, 9 Persons, 9 Doors" contains what looks exactly like an hours
+    // claim. Without the titles, the checker rejects the whole sentence and the
+    // player loses a correct answer to a false positive.
+    const shortlist = [{ achievementPercent: 76, estHoursRemaining: 12 }];
+    const sentence =
+      "9 Hours, 9 Persons, 9 Doors is your best bet: 76% achievements and about 12h left.";
+
+    assert.deepEqual(
+      findUngroundedNumbers(sentence, shortlist, ["9 Hours, 9 Persons, 9 Doors"]),
+      [],
+    );
+    // Without the title it is a false positive, which is the bug being fixed.
+    assert.deepEqual(findUngroundedNumbers(sentence, shortlist), ["9 Hours"]);
+  });
+
+  await test("masking a title does not hide a real error next to it", () => {
+    // The mask must not become a way to smuggle a bad number through: only the
+    // exact title text is blanked, and it keeps its length so everything after
+    // it still lines up with its own context.
+    const shortlist = [{ achievementPercent: 76, estHoursRemaining: 12 }];
+    assert.deepEqual(
+      findUngroundedNumbers(
+        "9 Hours, 9 Persons, 9 Doors is your best bet with 40h left.",
+        shortlist,
+        ["9 Hours, 9 Persons, 9 Doors"],
+      ),
+      ["40h"],
+    );
+  });
+
+  await test("titles with regex characters are masked safely", () => {
+    // A title is used to build a RegExp, so an unescaped one would either throw
+    // or match the wrong thing.
+    const shortlist = [{ achievementPercent: 50 }];
+    assert.deepEqual(
+      findUngroundedNumbers("Half-Life 2: Episode One is 50% done.", shortlist, [
+        "Half-Life 2: Episode One",
+      ]),
+      [],
+    );
+  });
+
   await test("templateReason names the game", () => {
     const scored = scoreGame(
       { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },

@@ -604,10 +604,39 @@ const METRIC_CONTEXT: { pattern: RegExp; keys: string[] }[] = [
  */
 const CONTEXT_WINDOW = 14;
 
+/**
+ * Blanks out game titles, keeping the string the same length.
+ *
+ * Titles are full of numbers, and some of them carry a unit word: "9 Hours, 9
+ * Persons, 9 Doors" reads to the matcher below as a claim of nine hours, finds
+ * no game with that figure, and discards a sentence whose real numbers were all
+ * correct. The names are known exactly - they come from the same scorer output
+ * being checked against - so the honest fix is to stop treating them as prose.
+ *
+ * Replaced with spaces rather than removed so every index stays valid for the
+ * context window in contradictsItsContext.
+ */
+function maskTitles(reason: string, titles: string[]): string {
+  const longestFirst = titles
+    .filter((title) => title.trim().length > 0)
+    .sort((a, b) => b.length - a.length);
+
+  let masked = reason;
+  for (const title of longestFirst) {
+    const escaped = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    masked = masked.replace(new RegExp(escaped, "gi"), (hit) => " ".repeat(hit.length));
+  }
+  return masked;
+}
+
 export function findUngroundedNumbers(
   reason: string,
   metrics: Record<string, number> | Record<string, number>[],
+  titles: string[] = [],
 ): string[] {
+  // Everything below reads `text`, not `reason`: the titles are masked out
+  // first so a name can never be mistaken for a claim.
+  const text = maskTitles(reason, titles);
   // The model writes ONE comparative sentence across the whole shortlist
   // ("Sifu beats Terraria's 33h"), so a number is grounded if it belongs to
   // any scored game, not just the top one. Checking per-game in isolation
@@ -648,7 +677,7 @@ export function findUngroundedNumbers(
     unit: Unit,
     raw: string,
   ): boolean => {
-    const window = reason.slice(index, index + raw.length + CONTEXT_WINDOW).toLowerCase();
+    const window = text.slice(index, index + raw.length + CONTEXT_WINDOW).toLowerCase();
 
     for (const { pattern, keys } of METRIC_CONTEXT) {
       if (!pattern.test(window)) continue;
@@ -665,7 +694,7 @@ export function findUngroundedNumbers(
   };
 
   const claims = [
-    ...reason.matchAll(
+    ...text.matchAll(
       // Ranges first ("3-7 hours", "3 to 7h"), so the lower bound is checked
       // too — matching only the number adjacent to the unit let a fabricated
       // lower bound ride along beside a real upper one.
@@ -684,7 +713,7 @@ export function findUngroundedNumbers(
 
   const seenSpans = new Set(claims.map((claim) => claim.index));
 
-  for (const match of reason.matchAll(
+  for (const match of text.matchAll(
     /(\d+(?:\.\d+)?)\s*(%|hours?\b|hrs?\b|h\b|achievements?\b)/gi,
   )) {
     const index = match.index ?? 0;

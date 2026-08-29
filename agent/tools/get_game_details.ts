@@ -1,28 +1,71 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { cacheFor } from "../lib/cache";
+import { cacheFor, pooledSettled } from "../lib/cache";
 import { getGameDetails, type GameDetails } from "../lib/steam";
+
+/** Same ceiling as score_backlog's shortlist: this exists to enrich one. */
+const MAX_GAMES = 6;
 
 /**
  * Genre and Steam's own review rating, from two keyless store endpoints.
  * This is what makes a genre/rating request ("a horror game", "something
  * well-reviewed") answerable from real data instead of the model guessing
  * from a title alone.
+ *
+ * Takes a LIST, because it used to take one appid and that was the single
+ * biggest source of wasted model requests. Every tool call is a full request
+ * against a free-tier daily cap, so "something well-reviewed and short" cost
+ * one request per candidate: seven tool calls for a four-game answer. The
+ * instructions said "check a few candidates, not every unstarted game", and
+ * prose is the wrong place to enforce a budget - `score_backlog` has never had
+ * this problem because its schema simply refuses more than four games.
+ *
+ * The lookups run concurrently and are cached per appid, so a batch of six
+ * costs about what one used to.
  */
 export default defineTool({
   description:
-    "Get a game's genres and Steam review rating (e.g. 'Overwhelmingly Positive'). Use this to check whether a candidate actually matches a genre, mood or rating the player asked for, BEFORE recommending it — check a few candidates, not every unstarted game.",
+    "Get genres and Steam review ratings (e.g. 'Overwhelmingly Positive') for up to 6 games at once. Use this to check whether candidates actually match a genre, mood or rating the player asked for, BEFORE recommending one. Pass every candidate you care about in a SINGLE call — do not call this once per game.",
   inputSchema: z.object({
-    appid: z.number().int().positive().describe("The Steam appid."),
+    appids: z
+      .array(z.number().int().positive())
+      .min(1)
+      .max(MAX_GAMES)
+      .describe(
+        `The Steam appids to look up, at most ${MAX_GAMES}, in one call. Pass the whole shortlist rather than calling this repeatedly.`,
+      ),
   }),
-  async execute({ appid }, ctx) {
+  async execute({ appids }, ctx) {
     const cache = cacheFor(ctx.session.id);
-
-    const cached = cache.details?.get(appid) as GameDetails | undefined;
-    const details = cached ?? (await getGameDetails(appid));
     cache.details ??= new Map();
-    cache.details.set(appid, details);
+    const cached = cache.details as Map<number, GameDetails>;
 
-    return details;
+    // Deduped: the model sometimes repeats an appid inside one list, and a
+    // duplicate lookup is a wasted request even when it is cheap.
+    const wanted = [...new Set(appids)];
+
+    const settled = await pooledSettled(wanted, 6, async (appid) => {
+      const known = cached.get(appid);
+      if (known) return known;
+      const details = await getGameDetails(appid);
+      cached.set(appid, details);
+      return details;
+    });
+
+    const games: GameDetails[] = [];
+    const failedLookups: number[] = [];
+
+    settled.forEach((result, index) => {
+      if (result.status === "fulfilled") games.push(result.value);
+      // A failed lookup is reported rather than dropped: "no genres" and "the
+      // store did not answer" are different, and only one of them means the
+      // game has no genres.
+      else failedLookups.push(wanted[index]);
+    });
+
+    return {
+      games,
+      failedLookups: failedLookups.length > 0 ? failedLookups : undefined,
+    };
   },
 });
