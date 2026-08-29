@@ -856,37 +856,30 @@ type DocumentSearchOutput = {
  * is usually the slowest" is observable; saying why is not, and this file has
  * no business guessing.
  */
-function WaitingNote({
-  label = "Thinking",
-  firstTurn = false,
-}: {
-  label?: string;
-  firstTurn?: boolean;
-}) {
+function WaitingNote({ label = "Thinking", since }: { label?: string; since: number | null }) {
+  // Measured from when the question was SENT, not from when this component
+  // mounted. Each step of a turn unmounts and remounts it, so a local counter
+  // restarted every time and timed the step rather than the question - it
+  // looked like the timer was stopping and starting for no reason.
+  //
+  // Held in state and advanced by the interval rather than read from Date.now()
+  // during render, which react-hooks/purity rightly rejects: render has to be
+  // idempotent, and the clock is exactly the kind of thing that is not.
   const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
-    const timer = setInterval(() => setSeconds((n) => n + 1), 1000);
+    if (since === null) return;
+    const update = () => setSeconds(Math.floor((Date.now() - since) / 1000));
+    update();
+    const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [since]);
 
-  const note =
-    seconds < 8
-      ? null
-      : firstTurn
-        ? seconds < 25
-          ? "The first question of a session is usually the slowest."
-          : "Still going. It has not failed, but you can stop it and try again."
-        : seconds < 25
-          ? "Taking longer than usual."
-          : "Still going. It has not failed, but you can stop it and try again.";
-
+  // No commentary. "Taking longer than usual" was true of almost every turn,
+  // which makes it noise rather than information, and it cannot tell a slow
+  // turn from a stuck one anyway. The clock says everything it knows.
   return (
-    <div className="space-y-1">
-      {/* Shimmer takes a single string child, so the clock is composed here. */}
-      <Shimmer className="text-sm">{seconds >= 4 ? `${label}… ${seconds}s` : `${label}…`}</Shimmer>
-      {note && <p className="text-xs text-muted-foreground">{note}</p>}
-    </div>
+    <Shimmer className="text-sm">{seconds >= 3 ? `${label}… ${seconds}s` : `${label}…`}</Shimmer>
   );
 }
 
@@ -1216,6 +1209,8 @@ export default function Home() {
   const agent = useEveAgent();
   const [profile, setProfile] = useState<VerifiedProfile | null>(null);
   const [input, setInput] = useState("");
+  /** When the current question was sent, so one clock covers the whole turn. */
+  const [askedAt, setAskedAt] = useState<number | null>(null);
 
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isFirstMessage = agent.data.messages.length === 0;
@@ -1224,6 +1219,11 @@ export default function Home() {
     const message = text.trim();
     if (message.length === 0 || !profile) return;
     setInput("");
+    // One clock for the whole question, however many steps it takes. Stamped in
+    // the updater rather than the body: react-hooks/purity cannot tell that
+    // this function only ever runs from an event, and the updater form is
+    // unambiguously outside render.
+    setAskedAt(() => Date.now());
 
     // Pass the already-resolved SteamID64 so the agent does not have to guess
     // at a vanity name. It only needs stating once; the session carries it.
@@ -1604,10 +1604,7 @@ export default function Home() {
                         return null;
                       })}
                       {isComposing && (
-                        <WaitingNote
-                          label="Working out the answer"
-                          firstTurn={messageIndex === 0}
-                        />
+                        <WaitingNote label="Working out the answer" since={askedAt} />
                       )}
                       {missingCitations.length > 0 && (
                         <SourceCitation sources={missingCitations} />
@@ -1622,7 +1619,7 @@ export default function Home() {
                 agent.data.messages[agent.data.messages.length - 1]?.role !== "assistant" && (
                   <Message from="assistant">
                     <MessageContent>
-                      <WaitingNote firstTurn={agent.data.messages.length <= 1} />
+                      <WaitingNote since={askedAt} />
                     </MessageContent>
                   </Message>
                 )}

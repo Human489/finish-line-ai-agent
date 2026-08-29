@@ -79,7 +79,39 @@ const LOOKUP_CONCURRENCY = 12;
  * On a hit this rarely matters, because the scan stops as soon as it has
  * enough. It binds on the miss, which is exactly the case that used to hang.
  */
-const TIME_BUDGET_MS = 9_000;
+const TIME_BUDGET_MS = 12_000;
+
+/**
+ * SteamSpy's "every game with tag X" list, used ONLY to decide what to look at
+ * first.
+ *
+ * It is not trustworthy as an answer: it is truncated and popularity-skewed,
+ * returning 10,896 games for Horror and 70 for Roguelike, and it counts a
+ * single stray vote, which is how Apex Legends ends up in the horror list. It
+ * is excellent as a hint, though, because a game that appears in it is far more
+ * likely to be a real match than an arbitrary game from the library.
+ *
+ * This matters because of the time budget. Scanning a 460-game library in
+ * library order found cosy games when the budget was measured in games and
+ * stopped finding them when it became measured in seconds - the matches were
+ * simply further down the list than the clock now reaches. Checking the likely
+ * candidates first puts them within the first batch or two instead.
+ */
+export async function taggedAppids(tag: string): Promise<Set<number>> {
+  const response = await fetch(`${STEAMSPY}?request=tag&tag=${encodeURIComponent(tag)}`, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) return new Set();
+
+  const body = (await response.json()) as Record<string, unknown>;
+  const appids = new Set<number>();
+  for (const key of Object.keys(body)) {
+    const appid = Number(key);
+    if (Number.isFinite(appid)) appids.add(appid);
+  }
+  return appids;
+}
 
 /**
  * British spellings and the obvious near-misses. Steam's tag is "Cozy", and a
@@ -195,6 +227,7 @@ export async function findByFacet(
   term: string,
   wanted: number,
   lookup: (appid: number) => Promise<Facets>,
+  hint: Set<number> = new Set(),
 ): Promise<{
   matches: TagMatch[];
   checked: number;
@@ -204,7 +237,13 @@ export async function findByFacet(
 }> {
   const target = term.trim().toLowerCase();
   const singular = target.replace(/s$/, "");
-  const budget = appids.slice(0, MAX_LOOKUPS);
+
+  // Likely candidates first, then everything else. Same set of games either
+  // way - only the order changes, so nothing is excluded by the hint being
+  // wrong or incomplete, it just takes longer to reach.
+  const likely = appids.filter((appid) => hint.has(appid));
+  const rest = appids.filter((appid) => !hint.has(appid));
+  const budget = [...likely, ...rest].slice(0, MAX_LOOKUPS);
 
   const matches: TagMatch[] = [];
   const genresSeen = new Set<string>();

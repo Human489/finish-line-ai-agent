@@ -2,7 +2,14 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { cacheFor } from "../lib/cache";
 import { getOwnedGames, type OwnedGame } from "../lib/steam";
-import { findByFacet, gameFacets, resolveTag, suggestTags, type Facets } from "../lib/tags";
+import {
+  findByFacet,
+  gameFacets,
+  resolveTag,
+  suggestTags,
+  taggedAppids,
+  type Facets,
+} from "../lib/tags";
 
 /**
  * Steam's entire store genre vocabulary.
@@ -85,6 +92,17 @@ export default defineTool({
     cache.facets ??= new Map();
     const facetCache = cache.facets as Map<number, Facets>;
 
+    /*
+     * Ask SteamSpy which games carry this tag AT ALL, and check those first.
+     *
+     * One request, and it only reorders the scan - every game is still
+     * eligible, so a truncated or noisy hint costs nothing but ordering. It is
+     * what makes a 12 second budget enough: the matches are usually in the
+     * first batch instead of four hundred games down the library.
+     */
+    const hintTag = await resolveTag(genre).catch(() => null);
+    const hint = hintTag ? await taggedAppids(hintTag).catch(() => new Set<number>()) : new Set<number>();
+
     const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
       unstarted.map((game) => game.appid),
       genre,
@@ -96,6 +114,7 @@ export default defineTool({
         facetCache.set(appid, facets);
         return facets;
       },
+      hint,
     );
 
     const byAppid = new Map(unstarted.map((game) => [game.appid, game.name]));
