@@ -38,8 +38,18 @@ const REQUEST_TIMEOUT_MS = 10_000;
  */
 const TAG_RANK_CEILING = 8;
 
-/** How many games to confirm before giving up, so one question stays bounded. */
-const MAX_TAG_LOOKUPS = 12;
+/**
+ * How many of the player's games one question may look at.
+ *
+ * Was 12, against a bulk list of "everything tagged X" used to pick which 12.
+ * That list turned out to be truncated and popularity-skewed - Horror returns
+ * 10,896 games, Roguelike returns 70 - so a player with an obscure roguelike
+ * was told they had none. Measured instead: 18 per-game lookups at concurrency
+ * 4 complete in half a second with no failures, so the library is now scanned
+ * directly and the bulk list is not used at all.
+ */
+const MAX_LOOKUPS = 200;
+const LOOKUP_CONCURRENCY = 5;
 
 /**
  * British spellings and the obvious near-misses. Steam's tag is "Cozy", and a
@@ -99,77 +109,106 @@ export async function suggestTags(): Promise<string[]> {
   return wanted.filter((tag) => names.has(tag.toLowerCase()));
 }
 
-/** Every appid SteamSpy associates with a tag. Noisy on purpose - see above. */
-export async function appidsWithTag(tag: string): Promise<Set<number>> {
-  const url = `${STEAMSPY}?request=tag&tag=${encodeURIComponent(tag)}`;
-  const response = await fetch(url, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-  if (!response.ok) throw new Error(`SteamSpy tag lookup failed (HTTP ${response.status}).`);
+export type Facets = { genres: string[]; tags: string[] };
 
-  const body = (await response.json()) as Record<string, unknown>;
-  const appids = new Set<number>();
-  for (const key of Object.keys(body)) {
-    const appid = Number(key);
-    if (Number.isFinite(appid)) appids.add(appid);
-  }
-  return appids;
-}
-
-/** A game's tags, most-voted first. Empty when SteamSpy has nothing. */
-async function topTags(appid: number): Promise<string[]> {
+/**
+ * One game's genres AND its tags, in a single request.
+ *
+ * Both come back together, which is why the genre scan uses this too. It used
+ * to walk Steam's own appdetails one game at a time, which is the endpoint that
+ * rate-limits, so a genre question could only ever look at the first slice of a
+ * library before being throttled.
+ *
+ * Tags are returned most-voted first: the order is what separates a game that
+ * IS horror from one somebody once labelled that way for a joke.
+ */
+export async function gameFacets(appid: number): Promise<Facets> {
   const response = await fetch(`${STEAMSPY}?request=appdetails&appid=${appid}`, {
     cache: "no-store",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`SteamSpy lookup failed (HTTP ${response.status}).`);
 
-  const body = (await response.json()) as { tags?: Record<string, number> | unknown[] };
-  const tags = body.tags;
-  // SteamSpy returns {} or [] for a game nobody has tagged, and an object of
-  // tag -> vote count otherwise.
-  if (!tags || Array.isArray(tags)) return [];
+  const body = (await response.json()) as {
+    genre?: string;
+    tags?: Record<string, number> | unknown[];
+  };
 
-  return Object.entries(tags)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name]) => name);
+  const genres =
+    typeof body.genre === "string"
+      ? body.genre.split(",").map((part) => part.trim()).filter(Boolean)
+      : [];
+
+  // SteamSpy returns {} or [] for a game nobody has tagged.
+  const raw = body.tags;
+  const tags =
+    raw && !Array.isArray(raw)
+      ? Object.entries(raw)
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name)
+      : [];
+
+  return { genres, tags };
 }
 
-export type TagMatch = { appid: number; tags: string[] };
+export type TagMatch = { appid: number; genres: string[]; tags: string[]; matchedBy: "genre" | "tag" };
 
 /**
- * Confirm which of these games genuinely carry the tag.
+ * Walk the player's games looking for one word, as a genre OR a tag.
  *
- * Checked in the order given and stopped as soon as `wanted` are confirmed, so
- * a common tag costs a couple of lookups rather than the full budget.
+ * Stops as soon as `wanted` are found, so a common word costs a handful of
+ * lookups and only a rare one spends the budget. Results are cached by the
+ * caller, so asking a second question about the same library is nearly free.
  */
-export async function confirmTagged(
+export async function findByFacet(
   appids: number[],
-  tag: string,
+  term: string,
   wanted: number,
-): Promise<{ matches: TagMatch[]; checked: number }> {
-  const target = tag.toLowerCase();
-  const budget = appids.slice(0, MAX_TAG_LOOKUPS);
-  const matches: TagMatch[] = [];
-  let checked = 0;
+  lookup: (appid: number) => Promise<Facets>,
+): Promise<{ matches: TagMatch[]; checked: number; genresSeen: Set<string>; failed: number }> {
+  const target = term.trim().toLowerCase();
+  const singular = target.replace(/s$/, "");
+  const budget = appids.slice(0, MAX_LOOKUPS);
 
-  // Two at a time. SteamSpy asks for about one request a second on this
-  // endpoint, and this is the difference between a bounded answer and hammering
-  // somebody's free service for a games recommendation.
-  for (let i = 0; i < budget.length && matches.length < wanted; i += 2) {
-    const slice = budget.slice(i, i + 2);
-    const settled = await pooledSettled(slice, 2, (appid) => topTags(appid));
+  const matches: TagMatch[] = [];
+  const genresSeen = new Set<string>();
+  let checked = 0;
+  let failed = 0;
+
+  for (let i = 0; i < budget.length && matches.length < wanted; i += LOOKUP_CONCURRENCY) {
+    const slice = budget.slice(i, i + LOOKUP_CONCURRENCY);
+    const settled = await pooledSettled(slice, LOOKUP_CONCURRENCY, lookup);
 
     settled.forEach((result, index) => {
       checked += 1;
-      if (result.status !== "fulfilled") return;
-      const rank = result.value.findIndex((name) => name.toLowerCase() === target);
-      if (rank >= 0 && rank < TAG_RANK_CEILING) {
-        matches.push({ appid: slice[index], tags: result.value.slice(0, 6) });
+      if (result.status !== "fulfilled") {
+        failed += 1;
+        return;
+      }
+
+      const { genres, tags } = result.value;
+      genres.forEach((g) => genresSeen.add(g));
+
+      const genreHit = genres.some((g) => {
+        const lower = g.toLowerCase();
+        return lower === target || lower === singular;
+      });
+      // A tag only counts near the top of the game's own votes. One person can
+      // put any tag on any game, and this is what keeps Apex Legends - which
+      // really does carry a horror tag - out of a horror recommendation.
+      const tagRank = tags.findIndex((t) => t.toLowerCase() === target || t.toLowerCase() === singular);
+      const tagHit = tagRank >= 0 && tagRank < TAG_RANK_CEILING;
+
+      if (genreHit || tagHit) {
+        matches.push({
+          appid: slice[index],
+          genres,
+          tags: tags.slice(0, 6),
+          matchedBy: genreHit ? "genre" : "tag",
+        });
       }
     });
   }
 
-  return { matches, checked };
+  return { matches, checked, genresSeen, failed };
 }

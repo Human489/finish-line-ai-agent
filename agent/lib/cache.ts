@@ -21,6 +21,8 @@ type SessionCache = {
   proton: Map<number, unknown>;
   rarity: Map<number, unknown>;
   details?: Map<number, unknown>;
+  /** Genres and tags per appid, so a second genre question rescans nothing. */
+  facets?: Map<number, unknown>;
   /**
    * The best document search this conversation has managed, so a later, weaker
    * search cannot erase it. Observed live: a first search cleared the relevance

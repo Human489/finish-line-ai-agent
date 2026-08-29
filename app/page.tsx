@@ -325,8 +325,13 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
              The box is now 2:3 so portrait art fits it exactly, and contain
              means the landscape fallbacks letterbox against the muted
              background rather than losing their title too.
+
+             cover returns from sm up, where the box IS 2:3 and matches
+             the source, so nothing is cropped and it fills the corners
+             cleanly. On phones the column is as tall as the card, so
+             cover there would crop by an unpredictable amount.
           */
-          className="h-full w-full object-contain"
+          className="h-full w-full object-contain sm:object-cover"
           onError={() => setCandidate((n) => n + 1)}
         />
       )}
