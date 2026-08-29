@@ -28,7 +28,13 @@
  *   npx tsx scripts/warm-eve.ts [baseUrl]
  */
 
-const BASE = process.argv[2] ?? process.env.EVE_BASE_URL ?? "http://127.0.0.1:4274";
+// 4278 is the port the README and CLAUDE.md both tell you to start eve on. The
+// default was 4274, left over from an earlier port choice, so following the
+// README literally - start eve on 4278, then run this with no argument -
+// warmed a port nothing was listening on and reported a connection failure for
+// a process that was running perfectly well. Note EVE_BASE_URL in .env.local
+// does not help here: nothing loads it for scripts, only `next dev` sees it.
+const BASE = process.argv[2] ?? process.env.EVE_BASE_URL ?? "http://127.0.0.1:4278";
 
 async function main() {
   const started = Date.now();
