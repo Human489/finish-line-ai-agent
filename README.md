@@ -22,7 +22,7 @@ The goal was to build something that used an LLM alongside real external data ra
 - Find games you could realistically finish over a weekend
 - Score story progress separately from achievement progress when that is what you care about
 - Suggest games that you own but have never launched
-- Filter games by genre or Steam review score using actual Steam store data, and say so plainly when Steam publishes no such genre
+- Filter games by Steam genre, Steam tag (horror, cosy, souls-like) or review score, correcting near-miss spellings, and say plainly when Steam has no such category
 - Show Linux and Steam Deck compatibility using ProtonDB
 - Answer questions about Steam, Proton, and ProtonDB using a small reference-document corpus
 
@@ -37,7 +37,7 @@ If HowLongToBeat has no useful data for a game, Steam fails to return something,
 | "What should I finish?"                                      | Checks achievement progress across played games, scores the best candidates and recommends one |
 | "What can I beat this weekend? I only care about the story." | Uses story-progress scoring instead of achievement completion                                  |
 | "What should I play next?"                                   | Looks at games you own but have never launched                                                 |
-| "Give me something horror-ish I haven't started."            | Steam has no horror genre, so it says so and offers the genres it does have as buttons          |
+| "Give me something horror-ish I haven't started."            | Horror is a Steam tag rather than a genre, so it searches tags and returns real horror games    |
 | "Something well-reviewed and short."                         | Combines Steam review scores with completion-time estimates                                    |
 | "How far through Hollow Knight am I?"                        | Scores just Hollow Knight instead of searching the whole library                               |
 | "Does Sifu work on Linux?"                                   | Returns its ProtonDB compatibility tier                                                        |
@@ -71,7 +71,7 @@ For example, a game can be almost finished while also being broken on Linux. Tho
 | `get_library`           | Gets the user's full Steam library and playtime                                                                  |
 | `sweep_achievements`    | Checks achievement completion across every played game and streams progress                                      |
 | `score_backlog`         | Calculates all scoring values and assigns categories for up to 4 games                                          |
-| `suggest_unstarted`     | Returns games with zero recorded playtime, filtered by real Steam genre if you ask for one                       |
+| `suggest_unstarted`     | Returns games with zero recorded playtime, filtered by real Steam genre or tag if you ask for one                |
 | `get_game_details`      | Gets genres and Steam review ratings                                                                             |
 | `get_playtime_estimate` | Gets estimated story and 100% completion times                                                                   |
 | `get_proton_rating`     | Gets the ProtonDB compatibility tier                                                                             |
