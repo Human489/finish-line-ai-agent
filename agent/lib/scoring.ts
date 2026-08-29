@@ -42,6 +42,13 @@ export type ScoredGame = {
      */
     remainingIsFloor: boolean;
     /**
+     * True when the player has already played longer than the whole
+     * completionist total and still has achievements outstanding. Every hours
+     * figure is a share of that total, so once it is spent none of them mean
+     * anything and all are withheld.
+     */
+    spentTheBudget: boolean;
+    /**
      * True when we could not determine whether this game has achievements at
      * all (a failed/partial Steam lookup), as opposed to a confirmed absence.
      * The UI and dataGaps wording must not claim "no achievements" in this
@@ -301,7 +308,50 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     metrics.estHoursRemainingHigh = scarcityRange.high;
   }
 
-  if (remainingIsFloor && scarcityRange) {
+  /*
+   * The completionist budget is already spent, and the achievements are still
+   * outstanding.
+   *
+   * Every hours figure here is a share of HowLongToBeat's 100% total: the
+   * linear one takes a percentage of it, the scarcity range reallocates it by
+   * rarity. Both assume that total still describes the work ahead. Once a
+   * player has passed it and the achievements remain, it demonstrably does not.
+   * Raised by a player looking at APB Reloaded: 4,059 hours played against a
+   * 145-hour completionist total, six achievements left, and the app answered
+   * "21 to 52h". There is no reading of that number which is true.
+   *
+   * What it usually means is not "a bit more time": it means the remainder is
+   * not time-gated at all. Skill, luck, co-operative players who are no longer
+   * around, an event that has ended - or simply someone who plays a game they
+   * love and does not care about its achievements. None of those are
+   * predictable from a completionist total, so no figure is offered.
+   *
+   * Deliberately strict: it fires only when playtime has passed the whole
+   * total, not at some fraction of it. A player at 90% of the completionist
+   * time still has a total that plausibly describes their route.
+   */
+  const spentTheBudget =
+    effectiveMode === "completionist" &&
+    fullCompletionHours !== null &&
+    input.hoursPlayed > fullCompletionHours &&
+    (achievements?.unearned.length ?? 0) > 0;
+
+  if (spentTheBudget) {
+    delete metrics.estHoursRemaining;
+    delete metrics.estHoursRemainingLow;
+    delete metrics.estHoursRemainingHigh;
+
+    // Names no figure. dataGaps reach the model as `caveats`, so quoting the
+    // played hours or the completionist total here would hand back numbers the
+    // reader should not take away as an estimate of what is left.
+    dataGaps.push(
+      // "100% time" would be the natural phrase and cannot be used: the
+      // grounding checker reads "100%" as a percentage claim, so the model
+      // repeating this caveat would have its sentence thrown away. Caught by a
+      // test, which is the only reason it is not in production.
+      "Already played longer than HowLongToBeat's full-completion time, with achievements still outstanding, so there is no sound basis for estimating how much longer they need.",
+    );
+  } else if (remainingIsFloor && scarcityRange) {
     const left = metrics.achievementsLeft;
     // Deliberately quotes the RANGE and not the linear figure: the range is
     // the defensible number here, and naming the linear one would re-introduce
@@ -411,6 +461,7 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
       protonTier: proton?.tier ?? null,
       hasAchievements,
       remainingIsFloor,
+      spentTheBudget,
       achievementsUnknown: achievements?.unknown ?? false,
       dataGaps,
     },
@@ -640,8 +691,19 @@ export function findUngroundedNumbers(
  */
 export function quotableMetrics(game: {
   metrics: Record<string, number>;
-  facts: { remainingIsFloor?: boolean };
+  facts: { remainingIsFloor?: boolean; spentTheBudget?: boolean };
 }): Record<string, number> {
+  // Already deleted from metrics when the budget is spent, so there is nothing
+  // to strip; kept explicit because this is the one function both the model
+  // output and the render-time guard go through, and a future metric added
+  // upstream should not quietly become quotable here.
+  if (game.facts.spentTheBudget) {
+    const quotable = { ...game.metrics };
+    delete quotable.estHoursRemaining;
+    delete quotable.estHoursRemainingLow;
+    delete quotable.estHoursRemainingHigh;
+    return quotable;
+  }
   if (!game.facts.remainingIsFloor) return game.metrics;
   const quotable = { ...game.metrics };
   delete quotable.estHoursRemaining;

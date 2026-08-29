@@ -313,6 +313,73 @@ async function main() {
     }
   });
 
+  // --- the completionist budget is already spent -------------------------
+
+  await test("no hours are offered once playtime passes the 100% total", () => {
+    // APB Reloaded in real life: thousands of hours played against a 145h
+    // completionist total, achievements still outstanding, and the app happily
+    // allocated another 21-52h out of a budget that was long gone.
+    const scored = scoreGame(
+      {
+        ...base,
+        hoursPlayed: 400,
+        achievements: achievements(),
+        playtime: playtime({ hoursToBeat: 39, hoursTo100: 145 }),
+        rarity: RARE,
+      },
+      "completionist",
+    );
+
+    assert.equal(scored.facts.spentTheBudget, true);
+    for (const key of ["estHoursRemaining", "estHoursRemainingLow", "estHoursRemainingHigh"]) {
+      assert.equal(scored.metrics[key], undefined, `${key} survived`);
+      assert.equal(quotableMetrics(scored)[key], undefined, `${key} is still quotable`);
+    }
+    assert.ok(
+      scored.facts.dataGaps.some((gap) => gap.includes("no sound basis")),
+      "no caveat explaining why hours are missing",
+    );
+  });
+
+  await test("the caveat for a spent budget names no figure", () => {
+    // dataGaps reach the model as `caveats`, so a number quoted here is a
+    // number handed back after quotableMetrics stripped it.
+    const scored = scoreGame(
+      {
+        ...base,
+        hoursPlayed: 400,
+        achievements: achievements(),
+        playtime: playtime({ hoursToBeat: 39, hoursTo100: 145 }),
+        rarity: RARE,
+      },
+      "completionist",
+    );
+    const gap = scored.facts.dataGaps.find((g) => g.includes("no sound basis")) ?? "";
+    assert.deepEqual(findUngroundedNumbers(gap, quotableMetrics(scored)), []);
+  });
+
+  await test("a player still inside the 100% total keeps an estimate", () => {
+    // The guard is deliberately strict. Someone at 90% of the completionist
+    // time still has a total that plausibly describes the work ahead, and
+    // suppressing there would strip estimates off most of a real library.
+    const scored = scoreGame(
+      {
+        ...base,
+        hoursPlayed: 130,
+        achievements: achievements(),
+        playtime: playtime({ hoursToBeat: 39, hoursTo100: 145 }),
+        rarity: RARE,
+      },
+      "completionist",
+    );
+    assert.equal(scored.facts.spentTheBudget, false);
+    assert.ok(
+      scored.metrics.estHoursRemainingLow !== undefined ||
+        scored.metrics.estHoursRemaining !== undefined,
+      "an estimate was suppressed while still inside the completionist total",
+    );
+  });
+
   await test("templateReason names the game", () => {
     const scored = scoreGame(
       { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
