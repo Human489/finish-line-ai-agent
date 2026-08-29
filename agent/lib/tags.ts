@@ -260,7 +260,11 @@ async function steamTagNames(): Promise<Map<string, string>> {
  */
 export async function resolveTag(term: string): Promise<string | null> {
   const names = await steamTagNames();
-  return names.get(normalise(term)) ?? null;
+  // Same matcher the scan uses. Looking the word up exactly here while the scan
+  // corrected it meant a typo was searched for correctly and then reported as
+  // "Steam does not cover rougelike" - with Roguelike offered as a button in
+  // the same sentence.
+  return bestTagMatch(term, [...names.values()]) ?? names.get(normalise(term)) ?? null;
 }
 
 /** A handful of real tags to offer when the player's word is not one. */
