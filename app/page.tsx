@@ -693,10 +693,14 @@ function InputRequestCard({
         </div>
       )}
 
-      {/* Freeform is also the fallback when a question ships no options at
-          all, which would otherwise leave nothing to click. */}
-      {(request.allowFreeform || !request.options?.length) && (
-        <form
+      {/*
+        ALWAYS offered, not only when the question ships no options or the model
+        remembers to set allowFreeform - which it never did, so every question
+        arrived as a row of buttons and no way to say anything else. The options
+        are the app's guesses at what someone wants; a player who wants none of
+        them should not have to pick the least wrong one.
+      */}
+      <form
           className="mt-2.5 flex items-end gap-2"
           onSubmit={(event: FormEvent<HTMLFormElement>) => {
             event.preventDefault();
@@ -719,8 +723,7 @@ function InputRequestCard({
           >
             Answer
           </Button>
-        </form>
-      )}
+      </form>
     </div>
   );
 }

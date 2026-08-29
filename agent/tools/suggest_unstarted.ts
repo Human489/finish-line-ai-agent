@@ -45,6 +45,12 @@ export default defineTool({
   inputSchema: z.object({
     steamId: z.string().regex(/^\d{17}$/).describe("A 17-digit SteamID64."),
     limit: z.number().int().min(1).max(30).default(15).describe("How many to return."),
+    scope: z
+      .enum(["unstarted", "all"])
+      .default("unstarted")
+      .describe(
+        "Which games to search. 'unstarted' is the default and means never launched. Use 'all' when the player is not asking for something NEW - 'a roguelike I own', 'do I have any horror games' - because a game they have already played is a perfectly good answer to that.",
+      ),
     genre: z
       .string()
       .min(2)
@@ -53,7 +59,7 @@ export default defineTool({
         "What kind of game they asked for, in their own words: 'horror', 'cosy', 'souls-like', 'roguelike', 'strategy'. Checked against both Steam genres and Steam tags, so do not translate it into a genre yourself.",
       ),
   }),
-  async execute({ steamId, limit, genre }, ctx) {
+  async execute({ steamId, limit, genre, scope }, ctx) {
     const cache = cacheFor(ctx.session.id);
 
     let library = cache.library as OwnedGame[] | undefined;
@@ -62,7 +68,15 @@ export default defineTool({
       cache.library = library;
     }
 
-    const unstarted = library.filter((game) => game.hoursPlayed === 0);
+    /*
+     * "Unstarted" was the only thing this could search, which made half the
+     * question unanswerable. Asked for a roguelike they already owned, the
+     * model had no tool for it and fell back to recognising titles - naming one
+     * game out of several, from memory, which is exactly the guessing the rest
+     * of this app refuses to do.
+     */
+    const unstarted =
+      scope === "all" ? library : library.filter((game) => game.hoursPlayed === 0);
 
     if (genre === undefined) {
       return {
@@ -189,7 +203,7 @@ export default defineTool({
         availableGenres: available,
         exampleTags: examples,
         games: [],
-        note: `"${genre}" is neither a Steam genre nor a Steam tag, so there is nothing to filter on. Do NOT say the player owns none. Say Steam does not categorise games that way, then use ask_question to offer a mix of the genres these games do have (${available.join(", ")}) and a few real tags (${examples.join(", ")}).`,
+        note: `"${genre}" is neither a Steam genre nor a Steam tag, so there is nothing to filter on. Do NOT say the player owns none. Say Steam does not categorise games that way, then you MUST call ask_question rather than listing alternatives in a sentence - the player gets buttons and a box to type in, which a list in prose does not give them. Offer a mix of the genres these games do have (${available.join(", ")}) and a few real tags (${examples.join(", ")}).`,
       };
     }
 

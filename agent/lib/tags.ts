@@ -349,8 +349,29 @@ export async function findByFacet(
   failed: number;
   ranOut: boolean;
 }> {
-  const target = term.trim().toLowerCase();
+  const target = fold(term);
   const singular = target.replace(/s$/, "");
+
+  /*
+   * A tag matches if the whole tag matches, OR any word of it does.
+   *
+   * Steam does not have one roguelike tag, it has several: Rogue-like,
+   * Rogue-lite, Action Roguelike and Roguelike Deckbuilder. Comparing whole
+   * names meant Cult of the Lamb ("Action Roguelike") and Slay the Spire
+   * ("Roguelike Deckbuilder") were not roguelikes as far as this was concerned,
+   * which is nonsense to anyone who has played them. Same for horror:
+   * Psychological Horror and Survival Horror are horror.
+   *
+   * Matched per WORD rather than as a substring, which matters: "Art" is a real
+   * tag and a substring match would find it inside "Cartoon".
+   */
+  const hits = (name: string): boolean => {
+    const whole = fold(name);
+    if (whole === target || whole === singular) return true;
+    return name
+      .split(/\s+/)
+      .some((word) => fold(word) === target || fold(word) === singular);
+  };
 
   // Likely candidates first, then everything else. Same set of games either
   // way - only the order changes, so nothing is excluded by the hint being
@@ -395,14 +416,11 @@ export async function findByFacet(
       const { genres, tags } = result.value;
       genres.forEach((g) => genresSeen.add(g));
 
-      const genreHit = genres.some((g) => {
-        const lower = g.toLowerCase();
-        return lower === target || lower === singular;
-      });
+      const genreHit = genres.some((g) => hits(g));
       // A tag only counts near the top of the game's own votes. One person can
       // put any tag on any game, and this is what keeps Apex Legends - which
       // really does carry a horror tag - out of a horror recommendation.
-      const tagRank = tags.findIndex((t) => t.toLowerCase() === target || t.toLowerCase() === singular);
+      const tagRank = tags.findIndex((t) => hits(t));
       const tagHit = tagRank >= 0 && tagRank < TAG_RANK_CEILING;
 
       if (genreHit || tagHit) {
