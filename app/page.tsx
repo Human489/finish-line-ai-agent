@@ -298,7 +298,7 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
   const src = sources[candidate];
 
   return (
-    <div className="relative h-full w-full shrink-0 overflow-hidden rounded-md bg-muted sm:aspect-2/3 sm:h-auto">
+    <div className="relative aspect-2/3 w-full overflow-hidden rounded-md bg-muted">
       {src === undefined ? (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           {name}
@@ -332,18 +332,16 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
              cover there would crop by an unpredictable amount.
           */
           /*
-             cover on phones, contain from sm - this way round, deliberately.
-             On a phone the artwork is a column beside the text and stretches to
-             the card's height, so contain left a short image floating in a tall
-             grey box and the card read as mostly empty. cover fills it, and the
-             crop is off the SIDES there, which box art survives because it
-             centres its title. It was the top-and-bottom crop of the old 4/5
-             box that cut titles in half.
-             From sm the box is aspect-2/3, exactly the source ratio, so the two
-             would be identical for portrait art - contain is kept because it is
-             also correct for the landscape fallbacks.
+             contain, always, in a box that is exactly Steam library art's 2:3
+             ratio - so portrait art fills it with nothing cropped, and the
+             landscape fallbacks letterbox rather than losing their titles.
+
+             A phone-only cover crop was tried while the card was a row, to
+             fill a stretched column. It filled the space and cut the sides off
+             artwork that has words in it: "Lake" rendered as "Lak", "Garden
+             Life" as "RDEN L". Reported, and rightly.
           */
-          className="h-full w-full object-cover sm:object-contain"
+          className="h-full w-full object-contain"
           onError={() => setCandidate((n) => n + 1)}
         />
       )}
