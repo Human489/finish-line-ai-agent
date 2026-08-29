@@ -30,6 +30,16 @@ const STEAMSPY = "https://steamspy.com/api.php";
 const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
+ * Much shorter for the per-game scan, because it runs hundreds of times.
+ *
+ * The deadline below is only checked BETWEEN batches, so a batch where every
+ * request stalls costs the full timeout before anything notices. At 10s that
+ * turned a 9 second budget into a 20 second one; at 3s the overshoot is small
+ * enough to be honest about.
+ */
+const SCAN_TIMEOUT_MS = 3_000;
+
+/**
  * A tag must be in a game's top few to count.
  *
  * This is the whole defence against "Apex Legends is horror". One person can
@@ -145,7 +155,7 @@ export type Facets = { genres: string[]; tags: string[] };
 export async function gameFacets(appid: number): Promise<Facets> {
   const response = await fetch(`${STEAMSPY}?request=appdetails&appid=${appid}`, {
     cache: "no-store",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(SCAN_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error(`SteamSpy lookup failed (HTTP ${response.status}).`);
 
@@ -201,6 +211,9 @@ export async function findByFacet(
   const deadline = Date.now() + TIME_BUDGET_MS;
   let checked = 0;
   let failed = 0;
+  // When the source itself is down or throttling us, every remaining lookup
+  // will fail the same way. Two dead batches is enough to know.
+  let consecutiveFailures = 0;
 
   for (
     let i = 0;
@@ -209,6 +222,14 @@ export async function findByFacet(
   ) {
     const slice = budget.slice(i, i + LOOKUP_CONCURRENCY);
     const settled = await pooledSettled(slice, LOOKUP_CONCURRENCY, lookup);
+    if (settled.every((result) => result.status !== "fulfilled")) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 2) {
+        checked += slice.length;
+        failed += slice.length;
+        break;
+      }
+    }
 
     settled.forEach((result, index) => {
       checked += 1;
@@ -216,6 +237,7 @@ export async function findByFacet(
         failed += 1;
         return;
       }
+      consecutiveFailures = 0;
 
       const { genres, tags } = result.value;
       genres.forEach((g) => genresSeen.add(g));
