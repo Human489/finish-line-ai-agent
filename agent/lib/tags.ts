@@ -25,6 +25,8 @@
 
 import { pooledSettled } from "./cache";
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const STEAM_TAGS = "https://store.steampowered.com/tagdata/populartags/english";
 const STEAMSPY = "https://steamspy.com/api.php";
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -184,11 +186,20 @@ export type Facets = { genres: string[]; tags: string[] };
  * Tags are returned most-voted first: the order is what separates a game that
  * IS horror from one somebody once labelled that way for a joke.
  */
-export async function gameFacets(appid: number): Promise<Facets> {
+export async function gameFacets(appid: number, attempt = 0): Promise<Facets> {
   const response = await fetch(`${STEAMSPY}?request=appdetails&appid=${appid}`, {
     cache: "no-store",
     signal: AbortSignal.timeout(SCAN_TIMEOUT_MS),
   });
+
+  // One retry. Measured mid-session: SteamSpy went from 18 of 18 lookups
+  // succeeding to 5 of 8, having been scanned hard all day. A flaky third party
+  // silently dropping a third of the library is how "you own no cosy games"
+  // gets said about a library with four of them.
+  if (!response.ok && attempt === 0) {
+    await sleep(250);
+    return gameFacets(appid, 1);
+  }
   if (!response.ok) throw new Error(`SteamSpy lookup failed (HTTP ${response.status}).`);
 
   const body = (await response.json()) as {

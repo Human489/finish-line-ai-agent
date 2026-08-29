@@ -178,6 +178,29 @@ export default defineTool({
       };
     }
 
+    /*
+     * If a big share of the lookups failed, "none of your games match" is not
+     * something that was established - it is something that was not checked.
+     *
+     * SteamSpy went from 18 of 18 lookups succeeding to 5 of 8 over the course
+     * of a day's testing, and the tool cheerfully reported that a library with
+     * four cosy games in it had none. Same failure this codebase already
+     * guards against for achievements: a lookup that did not answer is not a
+     * fact about the player.
+     */
+    if (checked > 0 && failed / checked > 0.25) {
+      return {
+        totalUnstarted: unstarted.length,
+        genre,
+        checked,
+        failedLookups: failed,
+        matchedBy: "tag-check-unavailable" as const,
+        availableGenres: available,
+        games: [],
+        note: `${failed} of the ${checked} games checked could not be looked up, so this search is not reliable. Say you could not check properly just now and it is worth trying again. Do NOT say the player owns nothing matching "${genre}".`,
+      };
+    }
+
     const kind = isSteamGenre ? "genre" : "tag";
     const label = canonicalTag ?? genre;
     return {
