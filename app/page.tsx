@@ -2,7 +2,7 @@
 
 import type { EveMessage } from "eve/client";
 import { useEveAgent } from "eve/react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   CATEGORY_LABELS,
   CATEGORY_DESCRIPTIONS,
@@ -833,6 +833,43 @@ type DocumentSearchOutput = {
 };
 
 /**
+ * A wait that explains itself once it stops being a normal wait.
+ *
+ * "Thinking..." is honest for three seconds and useless for sixty. The first
+ * question after a deployment pays eve's cold start - the agent and its tools
+ * are compiled lazily on first use, which is tens of seconds - and a spinner
+ * that says the same thing throughout leaves the player unable to tell a slow
+ * turn from a broken one. Reported exactly that way: "still waiting and got no
+ * feedback".
+ *
+ * So the message escalates with the clock. It never claims progress it cannot
+ * see, it just says what is actually likely to be happening by then.
+ */
+function WaitingNote({ label = "Thinking" }: { label?: string }) {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const note =
+    seconds < 8
+      ? null
+      : seconds < 25
+        ? "First question after an update is slower: the agent is warming up."
+        : "Still going. This is the warm-up rather than a hang, and it usually clears inside a minute.";
+
+  return (
+    <div className="space-y-1">
+      {/* Shimmer takes a single string child, so the clock is composed here. */}
+      <Shimmer className="text-sm">{seconds >= 4 ? `${label}… ${seconds}s` : `${label}…`}</Shimmer>
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
+/**
  * One collapsible line standing in for the turn's plumbing.
  *
  * A genre question can legitimately take four or five calls, and rendering each
@@ -1545,9 +1582,7 @@ export default function Home() {
 
                         return null;
                       })}
-                      {isComposing && (
-                        <Shimmer className="text-sm">Working out the answer…</Shimmer>
-                      )}
+                      {isComposing && <WaitingNote label="Working out the answer" />}
                       {missingCitations.length > 0 && (
                         <SourceCitation sources={missingCitations} />
                       )}
@@ -1561,7 +1596,7 @@ export default function Home() {
                 agent.data.messages[agent.data.messages.length - 1]?.role !== "assistant" && (
                   <Message from="assistant">
                     <MessageContent>
-                      <Shimmer className="text-sm">Thinking…</Shimmer>
+                      <WaitingNote />
                     </MessageContent>
                   </Message>
                 )}
