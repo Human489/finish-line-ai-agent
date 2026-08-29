@@ -298,7 +298,7 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
   const src = sources[candidate];
 
   return (
-    <div className="relative aspect-4/5 w-full overflow-hidden rounded-md bg-muted">
+    <div className="relative aspect-2/3 w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-full">
       {src === undefined ? (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           {name}
@@ -318,7 +318,15 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
           src={src}
           alt=""
           loading="lazy"
-          className="h-full w-full object-cover"
+          /*
+             contain, not cover. The portrait source is 600x900 (2:3) and the
+             box was 4:5, so cover trimmed the top and bottom - which is exactly
+             where box art puts the title. Reported as "half showing a word".
+             The box is now 2:3 so portrait art fits it exactly, and contain
+             means the landscape fallbacks letterbox against the muted
+             background rather than losing their title too.
+          */
+          className="h-full w-full object-contain"
           onError={() => setCandidate((n) => n + 1)}
         />
       )}
@@ -353,8 +361,19 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 
   return (
-    <div className="flex h-full flex-col rounded-lg border p-2">
-      <GameArtwork appid={game.appid} name={game.name} />
+    <div className="flex h-full flex-row gap-3 rounded-lg border p-2 sm:flex-col sm:gap-0">
+      {/*
+        A row on phones, a column from sm. At 2-up on a 375px screen each card
+        was ~175px wide carrying a title, a badge, a progress bar, a metrics
+        line and up to three caveat lines, which is more text than that width
+        can hold. One card per row with the artwork beside it gives the text
+        roughly double the width and costs nothing in height, because the
+        artwork was the tall part.
+      */}
+      <div className="w-24 sm:w-auto">
+        <GameArtwork appid={game.appid} name={game.name} />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col sm:contents">
 
       {/*
         Name and badge stack instead of sharing a line. Side by side they were
@@ -364,7 +383,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         is clamped to two lines, and the badge sits on its own row at full
         size rather than being squeezed.
       */}
-      <div className="mt-2 min-w-0">
+      <div className="min-w-0 sm:mt-2">
         <span className="line-clamp-2 text-sm leading-snug font-medium break-words" title={game.name}>
           {game.name}
         </span>
@@ -479,6 +498,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
           ))}
         </ul>
       )}
+      </div>
     </div>
   );
 }
@@ -500,9 +520,13 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
   return (
     <div className="space-y-2 p-3">
       {/*
-        2 up on phones, 4 from lg, and score_backlog returns at most 4, so the
-        whole answer is one row on either. The page shell is max-w-3xl (768px),
-        so at 4-up each card is roughly 175px — workable only because the card was
+        1 up on phones, 2 from sm, 4 from lg, and score_backlog returns at most
+        4, so the whole answer is one row on a laptop. Phones get one card per
+        row with the artwork beside the text: at 2-up on a 375px screen each
+        card was ~175px wide carrying a title, a badge, a progress bar, a
+        metrics line and up to three caveat lines, which is more text than that
+        width can hold. The page shell is max-w-3xl (768px), so at 4-up each
+        card is roughly 175px — workable only because the card was
         made compact for it: the category badge moved off the title line onto
         its own row, the title is clamped to two lines, the artwork was
         shortened from 2:3 to 4:5, and the supporting figures dropped to 11px.
@@ -512,7 +536,7 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
         Grid, not flex-wrap: a row mixes cards with 0 and 3 caveat lines, and
         grid's row-track sizing equalises their heights for free.
       */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
         ))}
