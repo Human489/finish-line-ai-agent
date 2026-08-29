@@ -85,7 +85,7 @@ export default defineTool({
     cache.facets ??= new Map();
     const facetCache = cache.facets as Map<number, Facets>;
 
-    const { matches, checked, genresSeen, failed } = await findByFacet(
+    const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
       unstarted.map((game) => game.appid),
       genre,
       limit,
@@ -100,7 +100,7 @@ export default defineTool({
 
     const byAppid = new Map(unstarted.map((game) => [game.appid, game.name]));
     const available = [...genresSeen].sort();
-    const scannedEverything = checked >= unstarted.length;
+    const scannedEverything = !ranOut;
 
     if (matches.length > 0) {
       const viaTag = matches.every((match) => match.matchedBy === "tag");

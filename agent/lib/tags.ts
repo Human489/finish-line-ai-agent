@@ -56,7 +56,20 @@ const TAG_RANK_CEILING = 8;
  * is cached per appid, so the second question about a library costs nothing.
  */
 const MAX_LOOKUPS = 800;
-const LOOKUP_CONCURRENCY = 8;
+const LOOKUP_CONCURRENCY = 12;
+
+/**
+ * Wall-clock ceiling on one search, whatever the game budget says.
+ *
+ * Raising the budget to cover a whole library fixed the wrong answers and
+ * introduced a worse problem: a word that is not in the library walks all of it
+ * before saying so, and the player sits watching nothing happen. A count is the
+ * wrong unit for "how long will this take" - the right one is time.
+ *
+ * On a hit this rarely matters, because the scan stops as soon as it has
+ * enough. It binds on the miss, which is exactly the case that used to hang.
+ */
+const TIME_BUDGET_MS = 9_000;
 
 /**
  * British spellings and the obvious near-misses. Steam's tag is "Cozy", and a
@@ -172,17 +185,28 @@ export async function findByFacet(
   term: string,
   wanted: number,
   lookup: (appid: number) => Promise<Facets>,
-): Promise<{ matches: TagMatch[]; checked: number; genresSeen: Set<string>; failed: number }> {
+): Promise<{
+  matches: TagMatch[];
+  checked: number;
+  genresSeen: Set<string>;
+  failed: number;
+  ranOut: boolean;
+}> {
   const target = term.trim().toLowerCase();
   const singular = target.replace(/s$/, "");
   const budget = appids.slice(0, MAX_LOOKUPS);
 
   const matches: TagMatch[] = [];
   const genresSeen = new Set<string>();
+  const deadline = Date.now() + TIME_BUDGET_MS;
   let checked = 0;
   let failed = 0;
 
-  for (let i = 0; i < budget.length && matches.length < wanted; i += LOOKUP_CONCURRENCY) {
+  for (
+    let i = 0;
+    i < budget.length && matches.length < wanted && Date.now() < deadline;
+    i += LOOKUP_CONCURRENCY
+  ) {
     const slice = budget.slice(i, i + LOOKUP_CONCURRENCY);
     const settled = await pooledSettled(slice, LOOKUP_CONCURRENCY, lookup);
 
@@ -217,5 +241,7 @@ export async function findByFacet(
     });
   }
 
-  return { matches, checked, genresSeen, failed };
+  // ranOut says the search was cut short, so the caller can tell the player
+  // "none of the ones I looked at" instead of "you own none".
+  return { matches, checked, genresSeen, failed, ranOut: checked < appids.length };
 }
