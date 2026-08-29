@@ -2,6 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { cacheFor, pooledSettled } from "../lib/cache";
 import { getGameDetails, getOwnedGames, type GameDetails, type OwnedGame } from "../lib/steam";
+import { appidsWithTag, confirmTagged, resolveTag, suggestTags } from "../lib/tags";
 
 /** Genres are checked in batches, stopping as soon as enough games match. */
 const GENRE_BATCH = 40;
@@ -157,12 +158,70 @@ export default defineTool({
     const scannedEverything = checked >= unstarted.length;
     const available = [...seen].sort();
 
+    /*
+     * Steam's genres did not answer it, so try Steam's TAGS.
+     *
+     * Done inside this tool rather than by asking the model to try a second
+     * one: every tool call is a full model request, and "genre, then tag, then
+     * explain" as three round-trips is three requests for one question.
+     *
+     * Only reached when the word is not a genre at all. A real genre that
+     * simply matched nothing is a different answer, and re-asking it as a tag
+     * would muddle "you own none" with "Steam files that differently".
+     */
+    if (matches.length === 0 && !isSteamGenre) {
+      const canonicalTag = await resolveTag(genre).catch(() => null);
+
+      if (canonicalTag === null) {
+        const examples = await suggestTags().catch(() => []);
+        return {
+          totalUnstarted: unstarted.length,
+          genre,
+          checked,
+          matchedBy: "nothing" as const,
+          availableGenres: available,
+          exampleTags: examples,
+          games: [],
+          note: `"${genre}" is neither a Steam genre nor a Steam tag, so there is nothing to filter on. Do NOT say the player owns none. Say Steam does not categorise games that way, then use ask_question to offer a mix of the genres these games have (${available.join(", ")}) and a few real tags (${examples.join(", ")}).`,
+        };
+      }
+
+      const tagged = await appidsWithTag(canonicalTag).catch(() => new Set<number>());
+      const candidates = unstarted.filter((game) => tagged.has(game.appid));
+      const { matches: confirmed, checked: tagChecks } = await confirmTagged(
+        candidates.map((game) => game.appid),
+        canonicalTag,
+        limit,
+      );
+
+      const byAppid = new Map(unstarted.map((game) => [game.appid, game.name]));
+      return {
+        totalUnstarted: unstarted.length,
+        genre,
+        matchedBy: "tag" as const,
+        tag: canonicalTag,
+        candidatesWithTag: candidates.length,
+        checked: tagChecks,
+        availableGenres: available,
+        games: confirmed.map((match) => ({
+          appid: match.appid,
+          name: byAppid.get(match.appid) ?? String(match.appid),
+          genres: match.tags,
+        })),
+        note:
+          confirmed.length > 0
+            ? `"${canonicalTag}" is a Steam TAG rather than a genre, and these are confirmed to carry it near the top of their own tag votes. Pass appids to score_backlog before recommending one.`
+            : `"${canonicalTag}" is a real Steam tag, but none of the ${tagChecks} of the player's unstarted games checked actually carry it prominently. Say that, and do not claim they own none unless candidatesWithTag is 0.`,
+      };
+    }
+
     return {
       totalUnstarted: unstarted.length,
       genre,
       checked,
       failedLookups,
       genreExists: isSteamGenre,
+      matchedBy: matches.length > 0 ? ("genre" as const) : ("nothing" as const),
       scannedEverything,
       availableGenres: available,
       games: matches.slice(0, limit),
