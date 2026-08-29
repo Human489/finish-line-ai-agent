@@ -436,8 +436,14 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         */}
         {typeof metrics.estHoursRemainingLow === "number" &&
         typeof metrics.estHoursRemainingHigh === "number" ? (
-          <span className="whitespace-nowrap">
-            <span className="font-medium tabular-nums">
+          /*
+            Only the FIGURE is unbreakable, not the phrase around it. Marking
+            the whole thing nowrap pushed "3.7-12h left (rarity-based)" past a
+            132px card and straight over its neighbour - the label has to be
+            allowed to wrap, it is the number that must not split.
+          */
+          <span>
+            <span className="font-medium tabular-nums whitespace-nowrap">
               {metrics.estHoursRemainingLow}–{metrics.estHoursRemainingHigh}h
             </span>
             <span className="text-muted-foreground"> left (rarity-based)</span>
