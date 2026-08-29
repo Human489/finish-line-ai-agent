@@ -38,6 +38,8 @@ If HowLongToBeat has no useful data for a game, Steam fails to return something,
 | "What can I beat this weekend? I only care about the story." | Uses story-progress scoring instead of achievement completion                                  |
 | "What should I play next?"                                   | Looks at games you own but have never launched                                                 |
 | "Give me something horror-ish I haven't started."            | Horror is a Steam tag rather than a genre, so it searches tags and returns real horror games    |
+| "Do I own any roguelikes? Include ones I have played."       | Searches the whole library rather than only unstarted games                                     |
+| "Find me a rougelike I have not started."                    | Corrects the spelling against Steam's own tag list before searching                             |
 | "Something well-reviewed and short."                         | Combines Steam review scores with completion-time estimates                                    |
 | "How far through Hollow Knight am I?"                        | Scores just Hollow Knight instead of searching the whole library                               |
 | "Does Sifu work on Linux?"                                   | Returns its ProtonDB compatibility tier                                                        |
@@ -71,8 +73,8 @@ For example, a game can be almost finished while also being broken on Linux. Tho
 | `get_library`           | Gets the user's full Steam library and playtime                                                                  |
 | `sweep_achievements`    | Checks achievement completion across every played game and streams progress                                      |
 | `score_backlog`         | Calculates all scoring values and assigns categories for up to 4 games                                          |
-| `suggest_unstarted`     | Returns games with zero recorded playtime, filtered by real Steam genre or tag if you ask for one                |
-| `get_game_details`      | Gets genres and Steam review ratings                                                                             |
+| `suggest_unstarted`     | Finds games by Steam genre or tag, correcting near-miss spellings. Unstarted by default, or the whole library    |
+| `get_game_details`      | Gets genres and Steam review ratings for up to 6 games in one call                                               |
 | `get_playtime_estimate` | Gets estimated story and 100% completion times                                                                   |
 | `get_proton_rating`     | Gets the ProtonDB compatibility tier                                                                             |
 | `search_documents`      | Searches the local reference corpus for Steam, Proton and ProtonDB information                                   |
@@ -360,7 +362,11 @@ So the range is scaled from how rare the remaining achievements are, not from ho
 
 Treat it as a rough range rather than a prediction. The width is there to say the answer is uncertain, not to bracket it precisely.
 
-There is one case where no figure is offered at all. Every hours number is a share of HowLongToBeat's completionist total, so once you have already played longer than that total and still have achievements outstanding, none of them mean anything. The card then shows how many achievements are left and says why there is no estimate.
+There are two cases where no figure is offered at all.
+
+Every hours number is a share of HowLongToBeat's completionist total, so once you have already played longer than that total and still have achievements outstanding, none of them mean anything. The card then shows how many achievements are left and says why there is no estimate.
+
+The same goes for story time. If you have played longer than the main-story estimate, that estimate no longer describes your playthrough, so no figure is given. What it does not do is conclude that you finished the story: you can put three times the estimate into exploring and still be halfway through, and Steam does not publish story completion for anyone to check.
 
 ### Steam profiles need to be public
 
