@@ -354,9 +354,11 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     effectiveMode === "beat-once" && estHoursRemaining !== null && estHoursRemaining <= 0;
 
   if (storyAlreadyBeaten) {
-    dataGaps.push(
-      "The main story is already finished, so there is nothing left to beat here. Do not offer this as something to play through, and do not quote the hours-to-beat figure as time remaining.",
-    );
+    // Player-facing prose ONLY. dataGaps render on the card, so an instruction
+    // aimed at the model ("do not offer this...") appears verbatim to whoever
+    // is reading, which is how the first version of this shipped. Guidance for
+    // the model belongs in instructions.md, where it already is.
+    dataGaps.push("You have already played past the main story, so there is nothing left to beat here.");
   }
 
   const spentTheBudget =
