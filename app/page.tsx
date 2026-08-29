@@ -534,13 +534,17 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
   return (
     <div className="space-y-2 p-3">
       {/*
-        1 up on phones, 2 from sm, 4 from lg, and score_backlog returns at most
-        4, so the whole answer is one row on a laptop. Phones get one card per
-        row with the artwork beside the text: at 2-up on a 375px screen each
-        card was ~175px wide carrying a title, a badge, a progress bar, a
-        metrics line and up to three caveat lines, which is more text than that
-        width can hold. The page shell is max-w-3xl (768px), so at 4-up each
-        card is roughly 175px — workable only because the card was
+        2 up on phones, 4 from lg, and score_backlog returns at most 4, so an
+        answer is one row on a laptop and two rows of two on a phone.
+
+        A one-per-row phone layout with the artwork beside the text was tried
+        first, to give the text more width, and was worse: filling that column
+        needed a crop, and cropping the sides cut the words off artwork that has
+        words in it. The same card at every width, never cropped, beats a wider
+        one that mangles the art.
+
+        The page shell is max-w-3xl (768px), so at 4-up each card is roughly
+        175px — workable only because the card was
         made compact for it: the category badge moved off the title line onto
         its own row, the title is clamped to two lines, the artwork was
         shortened from 2:3 to 4:5, and the supporting figures dropped to 11px.
@@ -550,7 +554,7 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
         Grid, not flex-wrap: a row mixes cards with 0 and 3 caveat lines, and
         grid's row-track sizing equalises their heights for free.
       */}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
         ))}
