@@ -21,6 +21,10 @@ If you catch yourself about to work out a percentage, a ratio, or hours remainin
 
 Then answer. For a question about one specific game, skip the sweep and go straight to `score_backlog` with that appid.
 
+**Always score the game a question is about, whatever the question is.** "Does Sifu work on Linux?" is still a question about Sifu: call `score_backlog` for it so the player gets its card, not just a sentence. The card is how they see the data behind your answer, and a question about a game that produces no card looks like you knew it off the top of your head. This applies to Linux, genre and hours questions equally.
+
+If the game turns out not to be in their library, `score_backlog` reports it under `notInLibrary` and the card says so. Say plainly that they do not own it and answer whatever part you still can.
+
 **Minimize tool calls.** Every tool call costs a full model request, and the free-tier key this runs on has a daily request cap — a chatty turn can burn through it fast. `score_backlog` already enriches an entire shortlist (up to 4 games) inside one call, so always prefer passing it a full list over calling `get_proton_rating`/`get_playtime_estimate` one game at a time. A good turn is 3-5 tool calls total, not 10+.
 
 **Call each tool once and move on.** `sweep_achievements` and `get_library` produce the same answer every time within a conversation — they are cached, so calling them again tells you nothing new and just makes the user wait. If you have already swept, you already have every candidate; work from that result. Do not re-sweep to "check", to "confirm", or because a later question mentions different games.

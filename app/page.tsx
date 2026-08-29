@@ -298,7 +298,7 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
   const src = sources[candidate];
 
   return (
-    <div className="relative aspect-2/3 w-full shrink-0 overflow-hidden rounded-md bg-muted sm:w-full">
+    <div className="relative h-full w-full shrink-0 overflow-hidden rounded-md bg-muted sm:aspect-2/3 sm:h-auto">
       {src === undefined ? (
         <div className="flex h-full w-full items-center justify-center p-2 text-center text-xs text-muted-foreground">
           {name}
@@ -331,7 +331,19 @@ function GameArtwork({ appid, name }: { appid: number; name: string }) {
              cleanly. On phones the column is as tall as the card, so
              cover there would crop by an unpredictable amount.
           */
-          className="h-full w-full object-contain sm:object-cover"
+          /*
+             cover on phones, contain from sm - this way round, deliberately.
+             On a phone the artwork is a column beside the text and stretches to
+             the card's height, so contain left a short image floating in a tall
+             grey box and the card read as mostly empty. cover fills it, and the
+             crop is off the SIDES there, which box art survives because it
+             centres its title. It was the top-and-bottom crop of the old 4/5
+             box that cut titles in half.
+             From sm the box is aspect-2/3, exactly the source ratio, so the two
+             would be identical for portrait art - contain is kept because it is
+             also correct for the landscape fallbacks.
+          */
+          className="h-full w-full object-cover sm:object-contain"
           onError={() => setCandidate((n) => n + 1)}
         />
       )}
@@ -382,7 +394,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         gets the space. At w-16 the text gets ~179px and the art is still
         legible at 64x96.
       */}
-      <div className="w-16 sm:w-auto">
+      <div className="w-20 shrink-0 self-stretch sm:w-auto sm:self-auto">
         <GameArtwork appid={game.appid} name={game.name} />
       </div>
       <div className="flex min-w-0 flex-1 flex-col sm:contents">
@@ -515,18 +527,44 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 }
 
+/**
+ * A game the player does not own, shown as a card rather than a footnote.
+ *
+ * Asking about a game you do not have is a perfectly ordinary thing to do, and
+ * the honest answer is short: it is not here. It gets a card because every
+ * other answer about a specific game does, and a sentence tucked under a grid
+ * reads like an error rather than an answer.
+ */
+function NotOwnedCard({ appid }: { appid: number }) {
+  return (
+    <div className="flex h-full flex-row gap-3 rounded-lg border border-dashed p-2 sm:flex-col sm:gap-0">
+      <div className="w-20 shrink-0 self-stretch sm:w-auto sm:self-auto">
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-muted text-xs text-muted-foreground sm:aspect-2/3 sm:h-auto">
+          ?
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col sm:contents">
+        <div className="min-w-0 sm:mt-2">
+          <span className="line-clamp-2 text-sm leading-snug font-medium break-words">
+            Not in this library
+          </span>
+          <Badge className="mt-1.5">Not owned</Badge>
+        </div>
+        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
+          appid {appid}. Nothing to score: progress, hours and achievements all
+          come from what this profile actually owns.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
-  if (output.scored.length === 0) {
+  if (output.scored.length === 0 && output.unknownAppids.length === 0) {
     // "No games were scored" on its own reads like a failure with no cause.
-    // Almost always the reason is right here in the output: every appid asked
-    // for was absent from the library.
-    return (
-      <p className="p-3 text-sm text-muted-foreground">
-        {output.unknownAppids.length > 0
-          ? `Nothing to show — ${output.unknownAppids.length === 1 ? "that game isn't" : "those games aren't"} in this library (appid ${output.unknownAppids.join(", ")}).`
-          : "No games were scored."}
-      </p>
-    );
+    // Nothing scored AND nothing rejected: there is genuinely nothing to say.
+    // The "not in this library" case now renders as a card below instead.
+    return <p className="p-3 text-sm text-muted-foreground">No games were scored.</p>;
   }
 
   return (
@@ -551,6 +589,11 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
+        ))}
+        {/* Shown alongside the scored games, not instead of them: asking about
+            four games where one is not owned should answer for all four. */}
+        {output.unknownAppids.map((appid) => (
+          <NotOwnedCard key={`unknown-${appid}`} appid={appid} />
         ))}
       </div>
       {output.unknownAppids.length > 0 && (
