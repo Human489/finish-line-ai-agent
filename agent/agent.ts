@@ -1,5 +1,5 @@
 import { google } from "@ai-sdk/google";
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
 import { withModelFallback } from "./lib/model-fallback";
 
 // gemini-2.5-flash is closed to new API keys. gemini-3.6-flash works but its
@@ -30,15 +30,27 @@ const model = withModelFallback([
 ]);
 
 export default defineAgent({
-  // Dynamic, because eve only accepts a live LanguageModel object (as opposed
-  // to a model id string) from the step.started scope — and the fallback
-  // wrapper is exactly that. The same instance is returned every step, so this
-  // is a static choice expressed through the only API that accepts it.
-  model: defineDynamic({
-    events: {
-      "step.started": () => model,
-    },
-  }),
+  /*
+   * Passed STATICALLY, which the config docs allow: "To call a provider
+   * directly and configure the model in code, pass a provider-authored
+   * LanguageModel". The step.started restriction applies to dynamic resolvers,
+   * not to this field, and believing otherwise cost about fifteen seconds a
+   * turn.
+   *
+   * Measured on the deployed app by timestamping the event stream: with
+   * defineDynamic, turn.started arrived at 0.1s and the first step produced
+   * nothing until 15.2s, after which the whole rest of the turn - three more
+   * steps and the answer - took four seconds. The docs explain the gap:
+   * "Dynamic models do not compile a default model or model metadata. When a
+   * resolver first selects a model, eve normalizes the selection and resolves
+   * any omitted context-window metadata from the AI Gateway catalog." That
+   * lookup happens at runtime, on the first step, every session.
+   *
+   * A static model compiles that metadata at build time instead. Same model,
+   * same fallback wrapper, same single instance - just resolved before anyone
+   * is waiting on it.
+   */
+  model,
   // All the judgement lives in score_backlog. The model picks a shortlist and
   // writes one grounded sentence per game, so extended reasoning buys nothing
   // and costs noticeable latency on every step of the loop.
