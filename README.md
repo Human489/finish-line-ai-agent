@@ -22,7 +22,7 @@ The goal was to build something that used an LLM alongside real external data ra
 - Find games you could realistically finish over a weekend
 - Score story progress separately from achievement progress when that is what you care about
 - Suggest games that you own but have never launched
-- Filter games by genre or Steam review score using actual Steam store data
+- Filter games by genre or Steam review score using actual Steam store data, and say so plainly when Steam publishes no such genre
 - Show Linux and Steam Deck compatibility using ProtonDB
 - Answer questions about Steam, Proton, and ProtonDB using a small reference-document corpus
 
@@ -37,7 +37,7 @@ If HowLongToBeat has no useful data for a game, Steam fails to return something,
 | "What should I finish?"                                      | Checks achievement progress across played games, scores the best candidates and recommends one |
 | "What can I beat this weekend? I only care about the story." | Uses story-progress scoring instead of achievement completion                                  |
 | "What should I play next?"                                   | Looks at games you own but have never launched                                                 |
-| "Give me something horror-ish I haven't started."            | Checks real Steam genres, and says so when Steam has no genre for what you asked               |
+| "Give me something horror-ish I haven't started."            | Steam has no horror genre, so it says so and offers the genres it does have as buttons          |
 | "Something well-reviewed and short."                         | Combines Steam review scores with completion-time estimates                                    |
 | "How far through Hollow Knight am I?"                        | Scores just Hollow Knight instead of searching the whole library                               |
 | "Does Sifu work on Linux?"                                   | Returns its ProtonDB compatibility tier                                                        |
@@ -71,12 +71,12 @@ For example, a game can be almost finished while also being broken on Linux. Tho
 | `get_library`           | Gets the user's full Steam library and playtime                                                                  |
 | `sweep_achievements`    | Checks achievement completion across every played game and streams progress                                      |
 | `score_backlog`         | Calculates all scoring values and assigns categories for up to 4 games                                          |
-| `suggest_unstarted`     | Returns games with zero recorded playtime                                                                        |
+| `suggest_unstarted`     | Returns games with zero recorded playtime, filtered by real Steam genre if you ask for one                       |
 | `get_game_details`      | Gets genres and Steam review ratings                                                                             |
 | `get_playtime_estimate` | Gets estimated story and 100% completion times                                                                   |
 | `get_proton_rating`     | Gets the ProtonDB compatibility tier                                                                             |
 | `search_documents`      | Searches the local reference corpus for Steam, Proton and ProtonDB information                                   |
-| `ask_question`          | An eve built-in that pauses the current turn and asks the user for missing information instead of guessing       |
+| `ask_question`          | An eve built-in that pauses the turn and asks you, with buttons to press or a box to type in                     |
 
 eve normally gives an agent several built-in tools:
 
@@ -98,13 +98,13 @@ The model receives the calculated numbers and the category rather than being ask
 
 ### Model output is checked before it is shown
 
-Any statistics the model includes in its final sentence are checked against the actual result returned by the scorer.
+Any figure the model quotes about a game is checked against the result the scorer actually produced, and the value, the unit and the metric all have to match.
 
-The value, unit and metric all need to match.
+For example, if it says there are "90 achievements left" when 90 was the number already earned, that fails. The number is real, the unit is right, and it is still the wrong claim.
 
-For example, if the model says that there are "90 achievements left" when 90 was actually the number already earned, that output fails validation.
+If the sentence cannot be grounded, it is replaced by a deterministic one built from the same figures.
 
-If the generated explanation cannot be grounded in the underlying result, it gets replaced by a deterministic fallback sentence.
+Two things it deliberately does not do. Numbers with no unit are ignored, because most of them here are titles rather than claims: "Portal 2" is not an assertion about anything. And the check needs a scorer result to compare against, so it covers answers about your games rather than answers drawn from the documents, which are checked for their citation instead.
 
 ### Unknown values stay unknown
 
@@ -359,6 +359,8 @@ There is no reliable public dataset containing the amount of time required for e
 So the range is scaled from how rare the remaining achievements are, not from how hard they are, and rarity is a poor stand-in for difficulty in both directions. An achievement can be rare because it was added recently and nobody has reached it yet, and it can be common because a game has a dedicated fanbase who all grind the same hundred-hour challenge. The upper bound is also capped by HowLongToBeat's 100% time, so a genuinely enormous grind cannot be represented at all.
 
 Treat it as a rough range rather than a prediction. The width is there to say the answer is uncertain, not to bracket it precisely.
+
+There is one case where no figure is offered at all. Every hours number is a share of HowLongToBeat's completionist total, so once you have already played longer than that total and still have achievements outstanding, none of them mean anything. The card then shows how many achievements are left and says why there is no estimate.
 
 ### Steam profiles need to be public
 
