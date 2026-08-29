@@ -49,10 +49,12 @@ export type ScoredGame = {
      */
     spentTheBudget: boolean;
     /**
-     * Beat-once mode, and playtime already exceeds the main story. The game is
-     * finished for the purposes of the question being asked.
+     * Beat-once mode, and playtime has passed HowLongToBeat's main-story
+     * estimate. This does NOT mean the story is finished - an explorer can
+     * double that estimate and still be mid-way - only that the estimate no
+     * longer describes this playthrough, so no hours figure is offered.
      */
-    storyAlreadyBeaten: boolean;
+    pastStoryEstimate: boolean;
     /**
      * True when we could not determine whether this game has achievements at
      * all (a failed/partial Steam lookup), as opposed to a confirmed absence.
@@ -350,15 +352,30 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
    * already finished, is a wrong claim built from right figures. The grounding
    * check cannot catch that, because every number in it is genuine.
    */
-  const storyAlreadyBeaten =
+  const pastStoryEstimate =
     effectiveMode === "beat-once" && estHoursRemaining !== null && estHoursRemaining <= 0;
 
-  if (storyAlreadyBeaten) {
-    // Player-facing prose ONLY. dataGaps render on the card, so an instruction
-    // aimed at the model ("do not offer this...") appears verbatim to whoever
-    // is reading, which is how the first version of this shipped. Guidance for
-    // the model belongs in instructions.md, where it already is.
-    dataGaps.push("You have already played past the main story, so there is nothing left to beat here.");
+  if (pastStoryEstimate) {
+    // No hours figure at all, rather than "~0h left". Zero is what the
+    // subtraction produced, not something anyone measured.
+    delete metrics.estHoursRemaining;
+    /*
+     * Says what is TRUE, which is much less than the first version claimed.
+     *
+     * It said "you have already played past the main story, so there is nothing
+     * left to beat here". Playtime is not completion. A player reported it on
+     * Elden Ring, where they had put in far more than the main-story estimate
+     * precisely BECAUSE they were exploring and had not finished it - the app
+     * told them a game they were mid-way through was done, and showed "~0h
+     * left" underneath.
+     *
+     * All that is actually known is that the estimate no longer describes this
+     * playthrough. Whether the story is finished is not something Steam
+     * publishes, so it is not something this can say.
+     */
+    dataGaps.push(
+      "Played for longer than HowLongToBeat's main-story estimate, so that estimate says nothing useful about how much is left here.",
+    );
   }
 
   const spentTheBudget =
@@ -493,7 +510,7 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
       hasAchievements,
       remainingIsFloor,
       spentTheBudget,
-      storyAlreadyBeaten,
+      pastStoryEstimate,
       achievementsUnknown: achievements?.unknown ?? false,
       dataGaps,
     },
@@ -752,12 +769,17 @@ export function findUngroundedNumbers(
  */
 export function quotableMetrics(game: {
   metrics: Record<string, number>;
-  facts: { remainingIsFloor?: boolean; spentTheBudget?: boolean };
+  facts: { remainingIsFloor?: boolean; spentTheBudget?: boolean; pastStoryEstimate?: boolean };
 }): Record<string, number> {
   // Already deleted from metrics when the budget is spent, so there is nothing
   // to strip; kept explicit because this is the one function both the model
   // output and the render-time guard go through, and a future metric added
   // upstream should not quietly become quotable here.
+  if (game.facts.pastStoryEstimate) {
+    const quotable = { ...game.metrics };
+    delete quotable.estHoursRemaining;
+    return quotable;
+  }
   if (game.facts.spentTheBudget) {
     const quotable = { ...game.metrics };
     delete quotable.estHoursRemaining;

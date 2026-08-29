@@ -215,8 +215,8 @@ type ScoredGameResult = Pick<ScoredGame, "appid" | "name" | "categoryLabel" | "m
   facts: Pick<ScoredGame["facts"], "protonTier" | "hasAchievements" | "achievementsUnknown" | "dataGaps"> & {
     /** estHoursRemaining is a lower bound, not an estimate. */
     remainingIsFloor?: boolean;
-    /** Beat-once mode, and the main story is already behind them. */
-    storyAlreadyBeaten?: boolean;
+    /** Playtime has passed the main-story estimate, so no hours figure is given. */
+    pastStoryEstimate?: boolean;
   };
   fallbackReason: string;
 };
@@ -378,26 +378,9 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 
   return (
-    <div className="flex h-full flex-row gap-3 rounded-lg border p-2 sm:flex-col sm:gap-0">
-      {/*
-        A row on phones, a column from sm. At 2-up on a 375px screen each card
-        was ~175px wide carrying a title, a badge, a progress bar, a metrics
-        line and up to three caveat lines, which is more text than that width
-        can hold. One card per row with the artwork beside it gives the text
-        roughly double the width and costs nothing in height, because the
-        artwork was the tall part.
-      */}
-      {/*
-        16, not 24. Measured on a 375px screen: at w-24 the artwork took 96px of
-        a 271px card and left the text 147px, which is NARROWER than the 159px
-        it had at 2-up. Going one card per row only helps if the text actually
-        gets the space. At w-16 the text gets ~179px and the art is still
-        legible at 64x96.
-      */}
-      <div className="w-20 shrink-0 self-stretch sm:w-auto sm:self-auto">
-        <GameArtwork appid={game.appid} name={game.name} />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col sm:contents">
+    <div className="flex h-full flex-col rounded-lg border p-2">
+      <GameArtwork appid={game.appid} name={game.name} />
+      <div className="contents">
 
       {/*
         Name and badge stack instead of sharing a line. Side by side they were
@@ -407,7 +390,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
         is clamped to two lines, and the badge sits on its own row at full
         size rather than being squeezed.
       */}
-      <div className="min-w-0 sm:mt-2">
+      <div className="mt-2 min-w-0">
         <span className="line-clamp-2 text-sm leading-snug font-medium break-words" title={game.name}>
           {game.name}
         </span>
@@ -527,44 +510,25 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
   );
 }
 
-/**
- * A game the player does not own, shown as a card rather than a footnote.
- *
- * Asking about a game you do not have is a perfectly ordinary thing to do, and
- * the honest answer is short: it is not here. It gets a card because every
- * other answer about a specific game does, and a sentence tucked under a grid
- * reads like an error rather than an answer.
- */
-function NotOwnedCard({ appid }: { appid: number }) {
-  return (
-    <div className="flex h-full flex-row gap-3 rounded-lg border border-dashed p-2 sm:flex-col sm:gap-0">
-      <div className="w-20 shrink-0 self-stretch sm:w-auto sm:self-auto">
-        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-muted text-xs text-muted-foreground sm:aspect-2/3 sm:h-auto">
-          ?
-        </div>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col sm:contents">
-        <div className="min-w-0 sm:mt-2">
-          <span className="line-clamp-2 text-sm leading-snug font-medium break-words">
-            Not in this library
-          </span>
-          <Badge className="mt-1.5">Not owned</Badge>
-        </div>
-        <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-          appid {appid}. Nothing to score: progress, hours and achievements all
-          come from what this profile actually owns.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
-  if (output.scored.length === 0 && output.unknownAppids.length === 0) {
+  if (output.scored.length === 0) {
     // "No games were scored" on its own reads like a failure with no cause.
-    // Nothing scored AND nothing rejected: there is genuinely nothing to say.
-    // The "not in this library" case now renders as a card below instead.
-    return <p className="p-3 text-sm text-muted-foreground">No games were scored.</p>;
+    /*
+     * A game they do not own gets a sentence, not a card.
+     *
+     * It had a card briefly - dashed, "Not owned", with the appid on it - and
+     * it looked broken, because a card is a frame for data and there is no data
+     * here. The scorer works from what the profile owns, so the honest answer
+     * is one line, and the appid is the model's guess at a game it cannot see
+     * anyway.
+     */
+    return (
+      <p className="p-3 text-sm text-muted-foreground">
+        {output.unknownAppids.length > 0
+          ? `Not in this library, so there is nothing to score${output.unknownAppids.length === 1 ? "" : " for those"}.`
+          : "No games were scored."}
+      </p>
+    );
   }
 
   return (
@@ -590,11 +554,7 @@ function ScoreBacklogResults({ output }: { output: ScoreBacklogOutput }) {
         {output.scored.map((game) => (
           <GameResultCard key={game.appid} game={game} />
         ))}
-        {/* Shown alongside the scored games, not instead of them: asking about
-            four games where one is not owned should answer for all four. */}
-        {output.unknownAppids.map((appid) => (
-          <NotOwnedCard key={`unknown-${appid}`} appid={appid} />
-        ))}
+
       </div>
       {output.unknownAppids.length > 0 && (
         // Matches the dataGaps styling on a card: quiet, muted, not an error.
@@ -791,12 +751,12 @@ function InputRequestCard({
  * per-game list would do exactly that.
  */
 function FallbackAnswer({ output }: { output: ScoreBacklogOutput }) {
-  // Skip games whose story is already finished. The scorer ranks a completed
-  // game highly - it is, after all, as close to done as a game gets - so the
-  // top entry was recommending something with nothing left to play, which is
-  // the same mistake the model was told not to make. Falls back to the top
-  // entry when everything scored is finished, because saying nothing is worse.
-  const top = output.scored.find((game) => !game.facts.storyAlreadyBeaten) ?? output.scored[0];
+  // Prefer a game whose remaining time is actually known. A game past its
+  // main-story estimate has no hours figure, so recommending it as the quick
+  // option says nothing - and the scorer ranks it highly precisely because it
+  // looks close to done. Falls back to the top entry when every scored game is
+  // in that state, because saying nothing is worse.
+  const top = output.scored.find((game) => !game.facts.pastStoryEstimate) ?? output.scored[0];
   if (!top) return null;
 
   return <MessageResponse>{top.fallbackReason}</MessageResponse>;
@@ -1481,8 +1441,8 @@ export default function Home() {
                   }
                 }
                 const rankedScored = [
-                  ...mergedScored.filter((game) => !game.facts.storyAlreadyBeaten),
-                  ...mergedScored.filter((game) => game.facts.storyAlreadyBeaten),
+                  ...mergedScored.filter((game) => !game.facts.pastStoryEstimate),
+                  ...mergedScored.filter((game) => game.facts.pastStoryEstimate),
                 ].slice(0, 4);
 
                 const mergedOutput: ScoreBacklogOutput | undefined =

@@ -463,6 +463,31 @@ async function main() {
     });
   }
 
+  await test("playing past the main story is not a claim that it is finished", () => {
+    // Raised on Elden Ring: a player deep into exploring had far exceeded the
+    // main-story estimate and was told the story was done, with "~0h left"
+    // under it. Playtime is not completion.
+    const scored = scoreGame(
+      {
+        ...base,
+        hoursPlayed: 120,
+        achievements: achievements({ hasAchievements: false, total: 0, earned: 0, percent: null }),
+        playtime: playtime({ hoursToBeat: 55, hoursTo100: null }),
+      },
+      "beat-once",
+    );
+
+    assert.equal(scored.facts.pastStoryEstimate, true);
+    assert.equal(scored.metrics.estHoursRemaining, undefined, "a 0h figure survived");
+    assert.equal(quotableMetrics(scored).estHoursRemaining, undefined, "0h is still quotable");
+
+    const gap = scored.facts.dataGaps.join(" ");
+    assert.ok(gap.includes("says nothing useful"), `caveat missing: ${gap}`);
+    for (const wrong of ["already played past", "nothing left to beat", "finished"]) {
+      assert.ok(!gap.includes(wrong), `caveat still claims completion: ${gap}`);
+    }
+  });
+
   await test("templateReason names the game", () => {
     const scored = scoreGame(
       { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },
