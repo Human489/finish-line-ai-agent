@@ -170,6 +170,8 @@ Cards pull art straight from Valve's CDN (`cdn.akamai.steamstatic.com/steam/apps
 
 So `artworkCandidates()` walks portrait → header → hero, advancing on each `onError`, and falls back to the game's name as text. Portrait first because the frame is shaped for it; the later two are landscape and get cropped by `object-cover`, which still reads as the game's art. Do not collapse this back to one URL.
 
+**`MAX_GAMES` is duplicated in prose and has already drifted once.** The cap lives in `score_backlog.ts` and its tool description interpolates it, but `instructions.md`, README and this file all state it by hand. When it went 10 to 5 to 4, instructions.md was left saying 5 while the schema rejected anything above 4 — so a model following the instructions exactly would have had its tool call fail validation. Grep for "up to" in all three when changing it.
+
 ### One source of truth for categories
 
 `agent/lib/categories.ts` holds the six categories' labels, descriptions and every numeric threshold. It has **zero imports** so that `app/page.tsx` (a `"use client"` component) can import it as safely as `scoring.ts` can. These were previously duplicated across `scoring.ts`, `page.tsx` and `instructions.md`, and the drift caused a real bug: the legend promised Quick Win meant "completable in eight hours or less", while `scoreGame` gated that category on completionist mode, so an achievement-less 3-hour game could never earn it. `instructions.md` is prose and still has to be updated by hand — it is the one remaining copy.
@@ -249,4 +251,4 @@ Category badge colours need a per-theme pair (`text-x-700 dark:text-x-400`). `bg
 
 `gemini-3.5-flash-lite` with `reasoning: "low"`. `gemini-2.5-flash` is closed to new keys; `gemini-3.6-flash` works but free-tier keys get 20 requests/day, which one conversation exhausts. `scripts/smoke-keys.ts` lists what the current key can reach.
 
-Every tool call is a model request. Prefer batching through `score_backlog` (handles up to 5 games in one call) over per-game tools.
+Every tool call is a model request. Prefer batching through `score_backlog` (handles up to 4 games in one call) over per-game tools.

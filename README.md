@@ -70,7 +70,7 @@ For example, a game can be almost finished while also being broken on Linux. Tho
 | `resolve_steam_profile` | Converts a vanity name, Steam profile URL or SteamID64 into a SteamID64 and checks whether the profile is public |
 | `get_library`           | Gets the user's full Steam library and playtime                                                                  |
 | `sweep_achievements`    | Checks achievement completion across every played game and streams progress                                      |
-| `score_backlog`         | Calculates all scoring values and assigns categories for up to 5 games                                          |
+| `score_backlog`         | Calculates all scoring values and assigns categories for up to 4 games                                          |
 | `suggest_unstarted`     | Returns games with zero recorded playtime                                                                        |
 | `get_game_details`      | Gets genres and Steam review ratings                                                                             |
 | `get_playtime_estimate` | Gets estimated story and 100% completion times                                                                   |
