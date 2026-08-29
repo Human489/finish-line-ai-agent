@@ -47,9 +47,16 @@ const TAG_RANK_CEILING = 8;
  * was told they had none. Measured instead: 18 per-game lookups at concurrency
  * 4 complete in half a second with no failures, so the library is now scanned
  * directly and the bulk list is not used at all.
+ *
+ * 800 rather than 200 because 200 was still a sample, not a search: a library
+ * with 460 unstarted games had more than half of it never looked at, and a
+ * player who owns exactly one roguelike was told there were none. The scan
+ * stops the moment it has enough, so a common word still costs a handful of
+ * lookups and only a genuinely rare one walks the whole library. Every result
+ * is cached per appid, so the second question about a library costs nothing.
  */
-const MAX_LOOKUPS = 200;
-const LOOKUP_CONCURRENCY = 5;
+const MAX_LOOKUPS = 800;
+const LOOKUP_CONCURRENCY = 8;
 
 /**
  * British spellings and the obvious near-misses. Steam's tag is "Cozy", and a
