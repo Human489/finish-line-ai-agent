@@ -144,10 +144,18 @@ function scarcityWeightedRemaining(
   if (matched === 0 || matched < achievements.unearned.length * 0.5) return null;
   if (totalGentle <= 0 || totalSteep <= 0) return null;
 
-  const gentle = round(fullCompletionHours * (leftGentle / totalGentle));
-  const steep = round(fullCompletionHours * (leftSteep / totalSteep));
+  const gentle = fullCompletionHours * (leftGentle / totalGentle);
+  const steep = fullCompletionHours * (leftSteep / totalSteep);
 
-  return { low: Math.min(gentle, steep), high: Math.max(gentle, steep) };
+  // A tenth of an hour is a measurement. This is a model, and "20.7 to 51.8h"
+  // reads as though six minutes of it were known. Whole hours above ten, one
+  // decimal below it so short games do not collapse to "0 to 1h".
+  const shape = (n: number) => (n >= 10 ? Math.round(n) : round(n));
+
+  return {
+    low: Math.min(shape(gentle), shape(steep)),
+    high: Math.max(shape(gentle), shape(steep)),
+  };
 }
 
 function meanRarityOfUnearned(
@@ -302,9 +310,17 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
       // Deliberately terse. This fires on most cards in a typical answer, and
       // the card already shows the range and the unlock rate right above it —
       // a long paragraph repeating them turned every card into a wall of text.
+      // Rarity is not difficulty, and this is the sentence that has to say so.
+      // Steam publishes what share of players hold an achievement and nothing
+      // else, so the range is scaled from how RARE the remainder is. That
+      // breaks in both directions: an achievement can be rare because it was
+      // added last month and nobody has got to it, or common because a
+      // dedicated fanbase all grind it for two hundred hours. The upper bound
+      // is also capped by HowLongToBeat's 100% time, so a genuinely enormous
+      // grind cannot show up as one.
       left !== undefined
-        ? `${left} rare achievement${left === 1 ? "" : "s"} left, so this is a range rather than a figure.`
-        : "The achievements left are rare, so this is a range rather than a figure.",
+        ? `${left} rare achievement${left === 1 ? "" : "s"} left. Scaled from how rare they are, not how hard, so treat it as a rough range.`
+        : "The achievements left are rare. Scaled from how rare they are, not how hard, so treat it as a rough range.",
     );
   } else if (remainingIsFloor && estHoursRemaining !== null) {
     const left = metrics.achievementsLeft;

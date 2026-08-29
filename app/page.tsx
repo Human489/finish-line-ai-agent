@@ -414,7 +414,7 @@ function GameResultCard({ game }: { game: ScoredGameResult }) {
             <span className="font-medium tabular-nums">
               {metrics.estHoursRemainingLow}–{metrics.estHoursRemainingHigh}h
             </span>
-            <span className="text-muted-foreground"> left (estimated)</span>
+            <span className="text-muted-foreground"> left (rarity-based)</span>
           </span>
         ) : facts.remainingIsFloor && typeof metrics.achievementsLeft === "number" ? (
           <span>

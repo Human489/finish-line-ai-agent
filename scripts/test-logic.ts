@@ -292,6 +292,27 @@ async function main() {
     }
   });
 
+  await test("the rarity range does not claim tenths of an hour above 10h", () => {
+    // A tenth of an hour is a measurement; this is a model. Anything at or
+    // above ten hours is whole hours, so "20.7 to 51.8h" cannot come back.
+    for (const rarity of [RARE, COMMON]) {
+      const scored = scoreGame(
+        {
+          ...base,
+          achievements: achievements(),
+          playtime: playtime({ hoursToBeat: 40, hoursTo100: 300 }),
+          rarity,
+        },
+        "completionist",
+      );
+      for (const key of ["estHoursRemainingLow", "estHoursRemainingHigh"] as const) {
+        const value = scored.metrics[key];
+        if (typeof value !== "number" || value < 10) continue;
+        assert.equal(value, Math.round(value), `${key} kept a decimal at ${value}`);
+      }
+    }
+  });
+
   await test("templateReason names the game", () => {
     const scored = scoreGame(
       { ...base, achievements: achievements(), playtime: playtime(), rarity: RARE },

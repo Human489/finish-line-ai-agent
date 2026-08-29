@@ -354,9 +354,11 @@ If it does break, the app reports that no completion-time data is available rath
 
 HowLongToBeat values are estimates to begin with, and the rare-achievement calculation is even less certain.
 
-There is no reliable public dataset containing the amount of time required for every individual achievement.
+There is no reliable public dataset containing the amount of time required for every individual achievement. Steam publishes how many players hold one, and nothing else.
 
-The rarity-weighted time range is therefore a modelled estimate rather than a measured value.
+So the range is scaled from how rare the remaining achievements are, not from how hard they are, and rarity is a poor stand-in for difficulty in both directions. An achievement can be rare because it was added recently and nobody has reached it yet, and it can be common because a game has a dedicated fanbase who all grind the same hundred-hour challenge. The upper bound is also capped by HowLongToBeat's 100% time, so a genuinely enormous grind cannot be represented at all.
+
+Treat it as a rough range rather than a prediction. The width is there to say the answer is uncertain, not to bracket it precisely.
 
 ### Steam profiles need to be public
 
