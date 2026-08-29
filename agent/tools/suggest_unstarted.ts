@@ -75,17 +75,24 @@ export default defineTool({
      * game out of several, from memory, which is exactly the guessing the rest
      * of this app refuses to do.
      */
-    const unstarted =
+    // Named for what it holds, which depends on scope. It was called
+    // `unstarted` throughout, and every note written against it said "never
+    // launched" - true of the default, a fabrication under scope: "all".
+    const pool =
       scope === "all" ? library : library.filter((game) => game.hoursPlayed === 0);
+    const poolLabel = scope === "all" ? "games in this library" : "unstarted games";
 
     if (genre === undefined) {
       return {
-        totalUnstarted: unstarted.length,
-        games: unstarted.slice(0, limit).map((game) => ({
+        totalUnstarted: pool.length,
+        games: pool.slice(0, limit).map((game) => ({
           appid: game.appid,
           name: game.name,
         })),
-        note: "These have never been launched. Pass appids to score_backlog for hours-to-beat and Linux compatibility before recommending one.",
+        note:
+          scope === "all"
+            ? "These come from the whole library, so some may already have been played. Pass appids to score_backlog for progress, hours-to-beat and Linux compatibility before recommending one."
+            : "These have never been launched. Pass appids to score_backlog for hours-to-beat and Linux compatibility before recommending one.",
       };
     }
 
@@ -133,7 +140,7 @@ export default defineTool({
      * genres pass through untouched.
      */
     const { matches, checked, genresSeen, failed, ranOut } = await findByFacet(
-      unstarted.map((game) => game.appid),
+      pool.map((game) => game.appid),
       term,
       limit,
       async (appid) => {
@@ -146,14 +153,24 @@ export default defineTool({
       hint,
     );
 
-    const byAppid = new Map(unstarted.map((game) => [game.appid, game.name]));
+    const byAppid = new Map(pool.map((game) => [game.appid, game.name]));
     const available = [...genresSeen].sort();
-    const scannedEverything = !ranOut;
+    /*
+     * Every game was ATTEMPTED and every attempt SUCCEEDED. Both halves matter.
+     *
+     * This was just !ranOut, which only means the scan reached the end of the
+     * list. Anything up to a quarter of those lookups could have failed - the
+     * branch above only refuses the claim past 25% - and the note below still
+     * told the model that "none of your games carry it" was safe to state as
+     * fact. On a 460-game library that is up to ninety games never actually
+     * confirmed, asserted as confirmed.
+     */
+    const scannedEverything = !ranOut && failed === 0;
 
     if (matches.length > 0) {
       const viaTag = matches.every((match) => match.matchedBy === "tag");
       return {
-        totalUnstarted: unstarted.length,
+        totalUnstarted: pool.length,
         genre,
         matchedBy: viaTag ? ("tag" as const) : ("genre" as const),
         checked,
@@ -164,7 +181,7 @@ export default defineTool({
           genres: match.genres,
           tags: match.tags,
         })),
-        note: `Found ${matches.length} matching "${genre}" in the first ${checked} of ${unstarted.length} unstarted games. Pass appids to score_backlog before recommending one.`,
+        note: `Found ${matches.length} matching "${genre}" in the first ${checked} of ${pool.length} unstarted games. Pass appids to score_backlog before recommending one.`,
       };
     }
 
@@ -183,7 +200,7 @@ export default defineTool({
 
     if (tagCheckFailed && !isSteamGenre) {
       return {
-        totalUnstarted: unstarted.length,
+        totalUnstarted: pool.length,
         genre,
         checked,
         matchedBy: "tag-check-unavailable" as const,
@@ -196,7 +213,7 @@ export default defineTool({
     if (!isSteamGenre && canonicalTag === null) {
       const examples = await suggestTags().catch(() => []);
       return {
-        totalUnstarted: unstarted.length,
+        totalUnstarted: pool.length,
         genre,
         checked,
         matchedBy: "nothing" as const,
@@ -219,7 +236,7 @@ export default defineTool({
      */
     if (checked > 0 && failed / checked > 0.25) {
       return {
-        totalUnstarted: unstarted.length,
+        totalUnstarted: pool.length,
         genre,
         checked,
         failedLookups: failed,
@@ -233,7 +250,7 @@ export default defineTool({
     const kind = isSteamGenre ? "genre" : "tag";
     const label = canonicalTag ?? genre;
     return {
-      totalUnstarted: unstarted.length,
+      totalUnstarted: pool.length,
       genre,
       checked,
       failedLookups: failed,
@@ -242,8 +259,8 @@ export default defineTool({
       availableGenres: available,
       games: [],
       note: scannedEverything
-        ? `"${label}" is a real Steam ${kind}, and none of the player's ${unstarted.length} unstarted games carry it. This one IS safe to state as a fact about their library.`
-        : `"${label}" is a real Steam ${kind}, but none of the ${checked} games checked carry it, and that is only the first ${checked} of ${unstarted.length} unstarted games. Say exactly that. Do NOT say they own none: the rest were never looked at.`,
+        ? `"${label}" is a real Steam ${kind}, and none of the player's ${pool.length} ${poolLabel} carry it. Every one was checked and every check succeeded, so this IS safe to state as a fact about that set - but say which set, not "your library" if only unstarted games were searched.`
+        : `"${label}" is a real Steam ${kind}, but none of the ${checked} games checked carry it, and that is only the first ${checked} of ${pool.length} unstarted games. Say exactly that. Do NOT say they own none: the rest were never looked at.`,
     };
   },
 });

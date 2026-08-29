@@ -366,14 +366,31 @@ export type ProtonRating = {
   reports: number | null;
 };
 
+/**
+ * "ProtonDB has nothing on this game" and "ProtonDB did not answer" are
+ * different, and returning null for both said the first when only the second
+ * was true.
+ *
+ * Same distinction AchievementProgress.unknown already makes for Steam. A
+ * player on a game with hundreds of Linux reports was told its compatibility
+ * was undocumented whenever ProtonDB happened to time out.
+ */
+export type ProtonLookup =
+  | { status: "ok"; rating: ProtonRating }
+  | { status: "none" }
+  | { status: "unknown" };
+
 /** ProtonDB compatibility. Keyless, unofficial. Display only - never scored. */
-export async function getProtonRating(appid: number): Promise<ProtonRating | null> {
+export async function getProtonRating(appid: number): Promise<ProtonLookup> {
   try {
     const response = await fetch(
       `https://www.protondb.com/api/v1/reports/summaries/${appid}.json`,
       { cache: "no-store", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
-    if (!response.ok) return null;
+    // 404 is ProtonDB saying it has no reports for this appid, which is an
+    // answer. Anything else is it failing to answer, which is not.
+    if (response.status === 404) return { status: "none" };
+    if (!response.ok) return { status: "unknown" };
 
     const body = (await response.json()) as {
       tier?: string;
@@ -382,15 +399,19 @@ export async function getProtonRating(appid: number): Promise<ProtonRating | nul
       total?: number;
     };
 
-    if (!body.tier) return null;
+    if (!body.tier) return { status: "none" };
 
     return {
-      tier: body.tier,
-      score: body.score ?? null,
-      confidence: body.confidence ?? null,
-      reports: body.total ?? null,
+      status: "ok",
+      rating: {
+        tier: body.tier,
+        score: body.score ?? null,
+        confidence: body.confidence ?? null,
+        reports: body.total ?? null,
+      },
     };
   } catch {
-    return null;
+    // Timeout, network failure, unparseable body: all "did not answer".
+    return { status: "unknown" };
   }
 }

@@ -9,7 +9,7 @@ import {
   getProtonRating,
   type AchievementProgress,
   type OwnedGame,
-  type ProtonRating,
+  type ProtonLookup,
 } from "../lib/steam";
 import {
   rankGames,
@@ -143,11 +143,13 @@ export default defineTool({
           return fresh;
         })(),
         (async () => {
-          const cached = cache.proton.get(game.appid) as ProtonRating | null | undefined;
-          if (cached !== undefined) return cached;
-          const fresh = await getProtonRating(game.appid);
-          cache.proton.set(game.appid, fresh);
-          return fresh;
+          const cached = cache.proton.get(game.appid) as ProtonLookup | undefined;
+          const lookup = cached ?? (await getProtonRating(game.appid));
+          // Never cache a failure: it describes the network a moment ago, not
+          // the game, and caching it would freeze one blip into every later
+          // answer in the conversation.
+          if (lookup.status !== "unknown") cache.proton.set(game.appid, lookup);
+          return lookup;
         })(),
       ]);
 

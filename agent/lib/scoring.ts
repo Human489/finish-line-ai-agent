@@ -7,7 +7,7 @@
  */
 
 import type { PlaytimeEstimate } from "./playtime";
-import type { AchievementProgress, ProtonRating } from "./steam";
+import type { AchievementProgress, ProtonLookup } from "./steam";
 import type { Category } from "./categories";
 import { CATEGORY_LABELS, THRESHOLDS } from "./categories";
 
@@ -19,7 +19,7 @@ export type ScoreInput = {
   hoursPlayed: number;
   achievements?: AchievementProgress | null;
   playtime?: PlaytimeEstimate | null;
-  proton?: ProtonRating | null;
+  proton?: ProtonLookup | null;
   /** apiname -> global unlock percentage. */
   rarity?: Record<string, number> | null;
 };
@@ -34,6 +34,8 @@ export type ScoredGame = {
   /** Non-numeric context the model may mention but must not treat as a number. */
   facts: {
     protonTier: string | null;
+    /** ProtonDB did not answer. NOT the same as having no reports. */
+    protonUnknown: boolean;
     hasAchievements: boolean;
     /**
      * True when estHoursRemaining is a lower bound rather than an estimate,
@@ -506,7 +508,10 @@ export function scoreGame(input: ScoreInput, mode: Mode): ScoredGame {
     mode: effectiveMode,
     metrics,
     facts: {
-      protonTier: proton?.tier ?? null,
+      protonTier: proton?.status === "ok" ? proton.rating.tier : null,
+      // Distinguishes "ProtonDB has nothing on this" from "ProtonDB did not
+      // answer", so the card can say the second rather than implying the first.
+      protonUnknown: proton?.status === "unknown",
       hasAchievements,
       remainingIsFloor,
       spentTheBudget,

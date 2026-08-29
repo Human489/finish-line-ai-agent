@@ -202,7 +202,10 @@ async function main() {
   // which meant one game could be both nearly finished AND unplayable while
   // only the second fact survived. It is reported as context instead.
   await test("Linux support does not change the category", () => {
-    const borked = { tier: "borked", score: null, confidence: null, reports: 3 };
+    const borked = {
+      status: "ok" as const,
+      rating: { tier: "borked", score: null, confidence: null, reports: 3 },
+    };
     const input = { ...base, achievements: achievements(), playtime: playtime(), rarity: COMMON };
 
     const withBorked = scoreGame({ ...input, proton: borked }, "completionist");
@@ -220,7 +223,10 @@ async function main() {
           ...base,
           hoursPlayed: 0,
           playtime: playtime(),
-          proton: { tier: "borked", score: null, confidence: null, reports: 3 },
+          proton: {
+            status: "ok" as const,
+            rating: { tier: "borked", score: null, confidence: null, reports: 3 },
+          },
         },
         "completionist",
       ),
@@ -429,7 +435,7 @@ async function main() {
   const STEAM_TAGS = [
     "Horror", "Psychological Horror", "Survival Horror", "Cozy", "Souls-like",
     "Roguelike", "Rogue-lite", "Strategy", "Puzzle", "Story Rich", "Accounting",
-    "Great Soundtrack", "Metroidvania",
+    "Great Soundtrack", "Metroidvania", "Action", "Faction",
   ];
 
   const matches: [string, string | null][] = [
@@ -452,6 +458,9 @@ async function main() {
     // as a substring, and answering "Accounting" would answer a question
     // nobody asked.
     ["zoological accounting", null],
+    // One edit from "Faction", and a completely different question. The first
+    // letter has to agree for a fuzzy match to count.
+    ["action", "Action"],
     ["", null],
     // Too short to fuzzy match, and not a real tag.
     ["abc", null],
@@ -486,6 +495,25 @@ async function main() {
     for (const wrong of ["already played past", "nothing left to beat", "finished"]) {
       assert.ok(!gap.includes(wrong), `caveat still claims completion: ${gap}`);
     }
+  });
+
+  await test("a ProtonDB outage is not reported as having no reports", () => {
+    // Raised by an audit: getProtonRating returned null both when ProtonDB had
+    // nothing on a game and when it failed to answer, and the tool said "No
+    // ProtonDB reports for this game" either way.
+    const unknown = scoreGame(
+      { ...base, playtime: playtime(), proton: { status: "unknown" as const } },
+      "completionist",
+    );
+    assert.equal(unknown.facts.protonTier, null);
+    assert.equal(unknown.facts.protonUnknown, true);
+
+    const none = scoreGame(
+      { ...base, playtime: playtime(), proton: { status: "none" as const } },
+      "completionist",
+    );
+    assert.equal(none.facts.protonTier, null);
+    assert.equal(none.facts.protonUnknown, false, "a real absence was marked unknown");
   });
 
   await test("templateReason names the game", () => {

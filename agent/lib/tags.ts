@@ -184,8 +184,19 @@ export function bestTagMatch(term: string, vocabulary: string[]): string | null 
   if (wanted.length < 4) return null;
   const limit = wanted.length >= 8 ? 2 : 1;
 
+  /*
+   * The first letter has to agree.
+   *
+   * Without it "action" is one edit from "Faction", so a player asking for
+   * action games could be silently handed a different tag entirely, with
+   * nothing in the output saying a substitution happened. Every correction
+   * worth making keeps the first letter: cosy/Cozy, rougelike/Roguelike,
+   * strategey/Strategy, "metroid vania"/Metroidvania. Every collision found
+   * changes it.
+   */
   let best: { name: string; score: number } | null = null;
   for (const tag of folded) {
+    if (tag.key[0] !== wanted[0]) continue;
     const score = distance(wanted, tag.key, limit);
     if (score <= limit && (best === null || score < best.score)) {
       best = { name: tag.name, score };
