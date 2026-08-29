@@ -849,6 +849,12 @@ type DocumentSearchOutput = {
  * warm-up line is now only offered when this is the first turn of the session,
  * which is the only case where it is known to apply. After that it says the
  * true and duller thing: this is taking a while and has not failed.
+ *
+ * It also does not name a CAUSE. An earlier version blamed compiling the agent
+ * on first use, which is documented behaviour of `eve dev` and not of a built
+ * deployment - `eve build` compiles ahead of time. Saying "the first question
+ * is usually the slowest" is observable; saying why is not, and this file has
+ * no business guessing.
  */
 function WaitingNote({
   label = "Thinking",
@@ -869,8 +875,8 @@ function WaitingNote({
       ? null
       : firstTurn
         ? seconds < 25
-          ? "The first question of a session is the slow one: the agent is compiled on first use."
-          : "Still going. The first question can take up to a minute while that happens."
+          ? "The first question of a session is usually the slowest."
+          : "Still going. It has not failed, but you can stop it and try again."
         : seconds < 25
           ? "Taking longer than usual."
           : "Still going. It has not failed, but you can stop it and try again.";
