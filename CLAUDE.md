@@ -66,6 +66,8 @@ They default to a public test profile; override with `SMOKE_STEAM_PROFILE` / `SM
 
 ## Why the first turn is slow
 
+**Everything in this section is about `eve dev`. In production the cause was different, and is covered in "The fifteen seconds that were not a cold start" below — read that first if the deployed app is slow.**
+
 Measured on a 597-game library, all four numbers from the same session:
 
 | | |
@@ -90,7 +92,27 @@ Two smaller contributors, both measured:
 - **Stale run recovery.** world-local replays active runs on startup. With 21 run directories in `.eve` this added ~35s to the first turn; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` removes it, at the cost of not resuming interrupted runs after a restart.
 - **Reasoning effort is not the cause.** `reasoning: "none"` was tried and made no measurable difference (59.1s vs 60.2s), so `low` was kept.
 
-If turns feel slow again, check in this order: is the eve process fresh (cold start), are the timeout vars set, and only then look at the model.
+If turns feel slow again locally, check in this order: is the eve process fresh (cold start), are the timeout vars set, and only then look at the model.
+
+## The fifteen seconds that were not a cold start
+
+The section above sent me looking for a compile that production does not do. `eve build` compiles ahead of time and writes `.eve/compile/compiled-agent-manifest.json`; the lazy first-use compile is a `eve dev` behaviour. So "the agent is warming up" was the wrong explanation for a deployed app, and it was told to a player as though it were fact.
+
+What it actually was, measured by instrumenting `fetch` in the browser and timestamping the event stream:
+
+| Event | Arrived |
+| --- | --- |
+| `session.started`, `turn.started` | 0.1s |
+| first `actions.requested` | **15.2s** |
+| three more steps, the answer, `turn.completed` | 19.3s |
+
+So the whole turn after the first step took four seconds, later steps ran 0.8-1.2s each, and the model itself benchmarks at 579ms. Fifteen seconds vanished before the first step did anything. Vercel's own logs agreed: the workflow step dispatches for a turn span about seven seconds.
+
+The cause was `agent/agent.ts` passing the model through `defineDynamic` on `step.started`. From `dynamic-capabilities.md`: *"Dynamic models do not compile a default model or model metadata. When a resolver first selects a model, eve normalizes the selection and resolves any omitted context-window metadata from the AI Gateway catalog."* A network lookup, at runtime, on the first step of every session.
+
+The comment justifying it claimed eve only accepts a live `LanguageModel` from the `step.started` scope. That is false of the static field — `agent-config.md`: *"To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`."* The `step.started` restriction applies to dynamic **resolvers**. Passing the model statically dropped the gap from 15.2s to 1.9s.
+
+Two things worth keeping from the hunt. **Measure the stream, not the wall clock** — timestamping the raw SSE chunks is what separated "the work is slow" from "the delivery is slow", and Vercel's logs then confirmed the work was never slow. And eve has **no `maxSteps` and no `stopWhen`**; its only runtime limits are token-based per session, and the sole per-call gate is the `approval` hook, which parks the turn for a human. A per-turn call budget has to come from tool schemas.
 
 ## Architecture
 
@@ -144,6 +166,23 @@ Observed live: search one cleared the floor with the right document, the model s
 - Describing the qualities instead ("in your own words, do not reuse a stock phrase") made it **reason aloud about phrasing**, and that reasoning landed *inside* the final message where the render-time fix cannot reach it.
 
 Terse rules plus an explicit "reply with the answer and nothing else" fixed both. If you loosen the tone guidance in `instructions.md`, expect the thinking to come back.
+
+### Genre is not what people ask for; tags are
+
+`agent/lib/tags.ts`. Steam's store genres are a short, coarse list - Action, Adventure, Indie, RPG, Strategy. Nobody asks for an Action game; they ask for something cosy, or a soulslike, or horror. Those are **tags**, and `appdetails` does not carry them, which is why a horror question was unanswerable until it did.
+
+Two sources, split by what each is actually authoritative for:
+
+- **Whether a tag exists** is Steam's own, from the 430-tag list the store's filters are built from.
+- **Which games carry a tag** is SteamSpy, because **Steam publishes no per-game tag endpoint at all**.
+
+SteamSpy's bulk list is noisy: everything tagged Horror is 10,896 games including Apex Legends and PUBG, because one stray vote counts. Its per-game data is good, because it has vote counts - Phasmophobia's top tag is Horror at 4,450 votes. So the bulk list only **orders** the scan, and every game actually offered must carry the tag inside its own top 8 by votes. `TAG_RANK_CEILING` is the entire defence against recommending Apex Legends as horror; do not raise it casually.
+
+**A tag matches on whole name OR any word of it.** Steam has no single roguelike tag - it has Rogue-like, Rogue-lite, Action Roguelike and Roguelike Deckbuilder - so whole-name comparison meant Cult of the Lamb and Slay the Spire were not roguelikes. Matched per word rather than by substring, because "Art" is a real tag and a substring match finds it inside "Cartoon".
+
+`bestTagMatch` is pure, takes the vocabulary as an argument and is unit-tested. Exact fold, then plurals, then bounded edit distance. **The first letter must agree**: without that, "action" is one edit from "Faction" and a player is silently handed a different tag. Four-character minimum, because "cosy" is four and is the case that started it.
+
+The scan is bounded twice over - `TIME_BUDGET_MS` and `MAX_LOOKUPS` - because a word nobody owns otherwise walks the whole library while someone waits. Cutting it short changes what may be claimed, so `ranOut` and `failed` both feed the notes: "none of the ones I checked" and "none of your games" are different sentences.
 
 ### Interim narration must not reach the player
 
@@ -222,9 +261,24 @@ Steam ships `™®©` in game names and HLTB does not — search terms are strip
 
 `pooled()` aborts every sibling if one worker rejects, which is the wrong failure mode for the achievement sweep — one bad response would discard hundreds of good lookups. `sweep_achievements` therefore uses `pooledSettled()` and reports a `failedLookups` count so a partial sweep is visible to the model and the player, rather than silently reading as "these games have no achievements".
 
+### Citation is enforced, not requested
+
+`agent/lib/citations.ts`, rendered in `page.tsx`. The model is asked to name the file it used and usually does; usually is the problem, because an uncited answer is indistinguishable from an invented one. `citationsToShow` returns the sources to print, or nothing if the answer already named one, and the line is rendered from the tool output.
+
+Appended rather than substituted - a missing citation is not a false statement the way an ungrounded number is - and satisfied by ONE named source, because an answer often rests on one document even when the search returned two. Suppressed when grounding will replace the text, or the citation would be attached to a sentence that never used the document. Zero-import module so `page.tsx` can import it without pulling `rag.ts`'s Cloudflare path into the browser bundle.
+
 ### Failure states must stay distinguishable
 
 `AchievementProgress.unknown` exists because collapsing every failure into `hasAchievements: false` made the app state a confident falsehood — a transient 500 produced the caveat "This game has no Steam achievements". A non-ok status, fetch error or parse failure now sets `unknown: true`, which `scoring.ts` turns into an honest "Steam did not return achievement data" caveat and `page.tsx` renders as "achievement data unavailable". Steam's 400 is genuinely ambiguous between "no achievements" and "private stats", so it counts as unknown.
+
+**This is the bug the codebase keeps rediscovering, so assume it is present in any new lookup.** An audit found four more of it in one pass, every one shaped the same way — a failed, skipped or truncated lookup reported as a fact about the player:
+
+- `getProtonRating` returned `null` both when ProtonDB had nothing and when it did not answer, so a game with hundreds of Linux reports was described as undocumented whenever it timed out. Now `ProtonLookup` is `ok | none | unknown`, with 404 meaning none and everything else meaning unknown. **Failures are never cached** — a failure describes the network a moment ago, not the game, and caching it freezes one blip into the whole conversation.
+- `getGameDetails` swallowed a rejected `appdetails` call, leaving `genres: []` — byte for byte what a game with no genres returns. `lookupFailed` now separates them.
+- `scannedEverything` meant "every game was attempted", not "every attempt succeeded", while telling the model its negative result was safe to state as fact.
+- `facts.pastStoryEstimate` was originally `storyAlreadyBeaten` and claimed the story was finished because playtime exceeded HowLongToBeat's main-story estimate. **Playtime is not completion** — an explorer exceeds that estimate precisely because they have not finished. Steam does not publish story completion, so the app cannot say it. All it knows is that the estimate no longer describes this playthrough, and the hours figure is withheld rather than shown as `~0h`.
+
+When adding any lookup, the question to ask is not "did I get data" but "can I tell an empty answer from no answer".
 
 ### Theming
 
